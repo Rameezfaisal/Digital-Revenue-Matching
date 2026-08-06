@@ -1,0 +1,1220 @@
+
+
+# COMMAND ----------
+
+# MAGIC %run /Workspace/DE-Transformation/utilities/job_parameters_and_environment_configuration
+
+# COMMAND ----------
+
+from datetime import datetime
+
+#set min and max timestamp for incremental data
+min_cdc_value = cdc_value
+max_cdc_value = datetime.now()
+
+print(f"{min_cdc_value} | {max_cdc_value}")
+
+# COMMAND ----------
+
+#Truncation for full reload
+if reload == 'Y':
+    print("Truncating data before load")
+    spark.sql(f"""TRUNCATE TABLE slv_salesorder.sales_order""")
+    min_cdc_value = spark.sql(f"""select cast("1900-01-01T00:00:00.000+0000" as timestamp)""").collect()[0][0]
+else:
+    print("Incremental load")
+
+# COMMAND ----------
+
+spark.sql(f"""
+    CREATE OR REPLACE TEMPORARY VIEW oh_sales_order AS
+    select * from(
+            SELECT *,
+            row_number() OVER (
+              PARTITION BY order_header_key
+              ORDER BY modifyts DESC
+            ) AS row_num FROM(
+                              SELECT
+                                ORDER_HEADER_KEY,
+                                ORDER_NO,
+                                currency,
+                                EXTN_SELLING_BRANCH,
+                                ENTERED_BY,
+                                MODIFYUSERID,
+                                CUSTOMER_PO_NO,
+                                CREATETS,
+                                order_date,
+                                REQ_DELIVERY_DATE,
+                                SCAC,
+                                IS_LINE_SHIP_COMPLETE,
+                                CHAIN_TYPE,
+                                req_ship_date,
+                                ORDER_PURPOSE,
+                                TAX_EXEMPTION_CERTIFICATE,
+                                PAYMENT_STATUS,
+                                TOTAL_AMOUNT,
+                                TAX,
+                                DOCUMENT_TYPE,
+                                division,
+                                BILL_TO_ID,
+                                SHIP_TO_ID,
+                                order_type,
+                                entry_type,
+                                EXTN_RETURN_TYPE,
+                                Seller_Organization_Code,
+                                ENTERPRISE_KEY,
+                                EXTN_PROJECT_NUMBER,
+                                EXTN_PROGRAM_NUMBER,
+                                CUSTOMER_FIRST_NAME,
+                                CUSTOMER_LAST_NAME,
+                                EXTN_IS_EXPORT_ORDER,
+                                dl_load_date,
+                                modifyts
+                              FROM
+                                brz_oms.order_header
+        ))
+      WHERE row_num = 1""")
+
+# COMMAND ----------
+
+spark.sql(f"""
+  CREATE OR REPLACE TEMPORARY VIEW ol_sales_order AS
+  select * from(
+          SELECT *,
+          row_number() OVER (
+            PARTITION BY order_line_key
+            ORDER BY modifyts DESC
+          ) AS row_num FROM(
+                            SELECT
+                              ORDER_LINE_KEY,
+                              ORDER_HEADER_KEY,
+                              dl_load_date,
+                              modifyts
+                              FROM
+                              brz_oms.order_line
+      ))
+    WHERE row_num = 1""")
+
+# COMMAND ----------
+
+spark.sql(f"""
+  CREATE OR REPLACE TEMPORARY VIEW lc_sales_order AS
+  select * from(
+          SELECT *,
+          row_number() OVER (
+            PARTITION BY header_key
+            ORDER BY modifyts DESC
+          ) AS row_num FROM(
+                            SELECT
+                              CHARGEAMOUNT,
+                              header_key,
+                              charge_category,
+                              dl_load_date,
+                              modifyts
+                            FROM
+                              brz_oms.line_charges
+      ))
+    WHERE row_num = 1""")
+
+# COMMAND ----------
+
+spark.sql(f"""
+  CREATE OR REPLACE TEMPORARY VIEW eoh_sales_order AS
+  select * from(
+          SELECT *,
+          row_number() OVER (
+            PARTITION BY order_header_key
+            ORDER BY modifyts DESC
+          ) AS row_num FROM(
+                            SELECT
+                              EXTN_ISR_ID,
+                              EXTN_OSR_ID,
+                              EXTN_OPERATING_GROUP_NAME,
+                              EXTN_OPERATING_GROUP,
+                              EXTN_IS_GOVERNMENT_COMPLIANCE,
+                              order_header_key,
+                              dl_load_date,
+                              Extn_BIR_Number,
+                              EXTN_FG_ROUTING,
+                              EXTN_IS_MILESTONE_BILLING,
+                              modifyts
+                            FROM
+                              brz_oms.extn_order_header
+      ))
+    WHERE row_num = 1""")
+
+# COMMAND ----------
+
+spark.sql(f"""
+  CREATE OR REPLACE TEMPORARY VIEW dso_sales_order AS
+  select * from(
+          SELECT *,
+          row_number() OVER (
+            PARTITION BY ordernumber
+            ORDER BY dl_load_date DESC
+          ) AS row_num FROM(
+                            SELECT
+                              wesco_totalgpamount,
+                              ordernumber,
+                              wesco_orderstatus,
+                              wesco_returnreasoncode,
+                              wesco_customergroupname,
+                              wesco_returnreasoncodename,
+                              wesco_ordersourcename,
+                              wesco_customergroup,
+                              wesco_ordersourcereference,
+                              wesco_isr,
+                              wesco_osr,
+                              wesco_isrname,
+                              wesco_osrname,
+                              quoteid,
+                              wesco_deferredrevenue,
+                              wesco_governmentcompliancetype,
+                              wesco_governmentcontractnumber,
+                              wesco_governmentcompliance,
+                              wesco_governmentrating,
+                              wesco_ordertype,
+                              wesco_referencedordernumber,
+                              wesco_loapprovedamount,
+                              wesco_loapprovedgppercent,
+                              wesco_loapprovaldate,
+                              wesco_loaapprover,
+                              wesco_loastatus,
+                              dl_load_date
+                            FROM brz_dynamics.salesorder
+      ))
+    WHERE row_num = 1""")
+
+# COMMAND ----------
+
+spark.sql(f"""
+  CREATE OR REPLACE TEMPORARY VIEW wc_sales_order AS
+  select * from(
+          SELECT *,
+          row_number() OVER (
+            PARTITION BY wesco_choicevalue
+            ORDER BY dl_load_date DESC
+          ) AS row_num FROM(
+                            SELECT
+                              wesco_choicelabel,
+                              wesco_columnname,
+                              wesco_name,
+                              wesco_choicevalue,
+                              dl_load_date
+                            FROM brz_dynamics.wesco_choices where wesco_columnname = 'wesco_orderstatus' and wesco_name = 'salesorder'
+      ))
+    WHERE row_num = 1""")
+
+# COMMAND ----------
+
+spark.sql(f"""
+  CREATE OR REPLACE TEMPORARY VIEW wc_sales_order_loa AS
+  select * from(
+          SELECT *,
+          row_number() OVER (
+            PARTITION BY wesco_choicevalue
+            ORDER BY dl_load_date DESC
+          ) AS row_num FROM(
+                            SELECT
+                              wesco_choicelabel,
+                              wesco_columnname,
+                              wesco_name,
+                              wesco_choicevalue,
+                              dl_load_date
+                            FROM brz_dynamics.wesco_choices where wesco_columnname =  'wesco_loastatus' and wesco_name = 'salesorder'
+      ))
+    WHERE row_num = 1""")
+
+# COMMAND ----------
+
+# DBTITLE 1,for compliance
+spark.sql(f"""
+  CREATE OR REPLACE TEMPORARY VIEW wc_sales_order_compliance AS
+  select * from(
+          SELECT *,
+          row_number() OVER (
+            PARTITION BY wesco_choicevalue
+            ORDER BY dl_load_date DESC
+          ) AS row_num FROM(
+                            SELECT
+                              wesco_choicelabel,
+                              wesco_columnname,
+                              wesco_name,
+                              wesco_choicevalue,
+                              dl_load_date
+                            FROM brz_dynamics.wesco_choices where wesco_columnname = 'wesco_governmentcompliance' and wesco_name = 'salesorder'
+      ))
+    WHERE row_num = 1""")
+
+# COMMAND ----------
+
+spark.sql(f"""
+  CREATE OR REPLACE TEMPORARY VIEW so_customeraccountsite AS
+  select * from(
+          SELECT *,
+          row_number() OVER (
+            PARTITION BY CUSTACCTSITEID
+            ORDER BY LastUpdateDate DESC
+          ) AS row_num FROM(
+                            SELECT
+                              LastUpdateDate,
+                              CUSTACCTSITEID,
+                              CUSTACCOUNTID,
+                              PARTYSITEID,
+                              dl_load_date
+                            FROM brz_oracle_scm.customeraccountsite
+      ))
+    WHERE row_num = 1""")
+
+# COMMAND ----------
+
+spark.sql(f"""
+  CREATE OR REPLACE TEMPORARY VIEW so_partysite AS
+  select * from(
+          SELECT *,
+          row_number() OVER (
+            PARTITION BY PARTYSITEID,PARTYSITENUMBER
+            ORDER BY LastUpdateDate DESC
+          ) AS row_num FROM(
+                            SELECT
+                              LOCATIONID,
+                              LastUpdateDate,
+                              PARTYSITEID,
+                              PARTYSITENUMBER,
+                              dl_load_date
+                            FROM brz_oracle_scm.partysite
+      ))
+    WHERE row_num = 1""")
+
+# COMMAND ----------
+
+spark.sql(f"""
+  CREATE OR REPLACE TEMPORARY VIEW so_wesco_lookup AS
+  select * from(
+          SELECT *,
+          row_number() OVER (
+            PARTITION BY id
+            ORDER BY dl_load_date DESC
+          ) AS row_num FROM(
+                            SELECT
+                              id,
+                              wesco_name,
+                              wesco_lookupid,
+                              dl_load_date
+                            FROM brz_dynamics.wesco_lookup
+      ))
+    WHERE row_num = 1""")
+
+# COMMAND ----------
+
+create_view('brz_dynamics.systemuser','systemuser_v', 'systemuserid','dl_load_date','employeeid,fullname,systemuserid,dl_load_date','dl_load_date','',max_cdc_value)
+
+# COMMAND ----------
+
+create_view('brz_dynamics.quote','quote_v', 'quoteid','dl_load_date','quoteid,quotenumber,dl_load_date','dl_load_date','',max_cdc_value)
+
+# COMMAND ----------
+
+spark.sql(f"""create or replace temporary view incremental_data as
+
+  with getIncrementalData as
+  (
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  where oh.dl_load_date > '{min_cdc_value}'
+
+  union
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join eoh_sales_order as eoh 
+  on eoh.order_header_key=oh.order_header_key
+  where eoh.dl_load_date > '{min_cdc_value}'
+
+  union
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join slv_hr.employee e 
+  on e.employee_number = oh.ENTERED_BY 
+  where e.dl_updated_ts > '{min_cdc_value}'
+
+  union
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join dso_sales_order as dso 
+  on dso.ordernumber=oh.order_no
+  where dso.dl_load_date > '{min_cdc_value}'
+
+  union
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join dso_sales_order as dso 
+  on dso.ordernumber=oh.order_no
+  inner join slv_hr.employee loa ON regexp_extract(dso.wesco_loaapprover, '[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}', 0) = loa.employee_email_address
+  and upper(loa.employee_status) = 'ACTIVE'
+  where loa.dl_updated_ts > '{min_cdc_value}'
+
+  union
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join dso_sales_order as dso 
+  on dso.ordernumber=oh.order_no
+  inner join systemuser_v as sui on sui.systemuserid = dso.wesco_isr
+  inner join slv_hr.employee e 
+  on e.employee_number = sui.employeeid
+  where (sui.dl_load_date > '{min_cdc_value}' or e.dl_updated_ts > '{min_cdc_value}')
+
+  union
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join dso_sales_order as dso 
+  on dso.ordernumber=oh.order_no
+  inner join systemuser_v as suo on suo.systemuserid = dso.wesco_osr
+  inner join slv_hr.employee e 
+  on e.employee_number = suo.employeeid
+  where (suo.dl_load_date > '{min_cdc_value}' or e.dl_updated_ts > '{min_cdc_value}')
+
+  union
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join dso_sales_order as dso 
+  on dso.ordernumber=oh.order_no
+  inner join quote_v qv 
+  on qv.quoteid=dso.quoteid
+  where qv.dl_load_date > '{min_cdc_value}'
+
+  union
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join dso_sales_order as dso 
+  on dso.ordernumber=oh.order_no
+  inner join quote_v qv 
+  on qv.quoteid=dso.quoteid
+  inner join slv_leadtoquote.quote slvq 
+  on slvq.quote_number = qv.quotenumber
+  where slvq.dl_updated_ts > '{min_cdc_value}'
+
+  union
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join ol_sales_order olc 
+  on olc.order_header_key=oh.order_header_key
+  where olc.dl_load_date > '{min_cdc_value}'
+  
+  union
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join lc_sales_order lc
+  on lc.header_key=oh.order_header_key
+  where lc.dl_load_date > '{min_cdc_value}'
+
+  union 
+  
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join dso_sales_order as dso 
+  on dso.ordernumber=oh.order_no
+  inner join so_wesco_lookup as swl 
+  on swl.id = dso.wesco_returnreasoncode
+  where swl.dl_load_date > '{min_cdc_value}' or dso.dl_load_date > '{min_cdc_value}'
+
+  union
+  
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join dso_sales_order as dso 
+  on dso.ordernumber=oh.order_no
+  inner join so_wesco_lookup as swl1 
+  on dso.wesco_governmentrating = swl1.wesco_lookupid
+  where swl1.dl_load_date > '{min_cdc_value}' or dso.dl_load_date > '{min_cdc_value}'
+
+  union
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join dso_sales_order as dso on dso.ordernumber=oh.order_no
+  inner join wc_sales_order as wc on wc.wesco_choicevalue = dso.wesco_orderstatus
+  where (dso.dl_load_date > '{min_cdc_value}' or wc.dl_load_date > '{min_cdc_value}')
+
+  union
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join dso_sales_order as dso on dso.ordernumber=oh.order_no
+  inner join wc_sales_order_compliance as wcpc_sub on dso.wesco_governmentcompliancetype = wcpc_sub.wesco_choicevalue 
+  where (dso.dl_load_date > '{min_cdc_value}' or wcpc_sub.dl_load_date > '{min_cdc_value}')
+
+  union
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join slv_location.wesco_legal_entity as wle 
+  on oh.division = wle.legal_entity_name
+  where wle.dl_updated_ts > '{min_cdc_value}'
+
+  union 
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join dso_sales_order as dso 
+  on dso.ordernumber=oh.order_no
+  inner join slv_customer.Customer_Group slv_cg 
+  on slv_cg.Customer_Grouping_Guid = dso.wesco_customergroup
+  where slv_cg.dl_updated_ts > '{min_cdc_value}'
+
+  union
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join (
+  select distinct ca.customer_account_number, location_role_id 
+  from slv_customer.customer_account ca
+  inner join so_customeraccountsite brz_cal on ca.customer_account_id =brz_cal.CUSTACCOUNTID
+  inner join slv_customer.customer_account_location cal on brz_cal.CUSTACCTSITEID = cal.customer_account_location_id
+  inner join slv_customer.customer_account_location_role calr on calr.customer_account_location_id=cal.customer_account_location_id
+  inner join so_partysite ps on ps.PARTYSITEID = brz_cal.PARTYSITEID and ps.PARTYSITENUMBER=ca.customer_account_number
+  where (ca.dl_updated_ts > '{min_cdc_value}' or brz_cal.dl_load_date > '{min_cdc_value}' or cal.dl_updated_ts > '{min_cdc_value}' or calr.dl_updated_ts > '{min_cdc_value}' or ps.dl_load_date > '{min_cdc_value}')
+  ) as cab on cab.customer_account_number = oh.BILL_TO_ID and cab.location_role_id='2'
+
+  union 
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join (
+  select distinct ca.customer_account_number, location_role_id 
+  from slv_customer.customer_account ca
+  inner join so_customeraccountsite brz_cal on ca.customer_account_id =brz_cal.CUSTACCOUNTID
+  inner join slv_customer.customer_account_location cal on brz_cal.CUSTACCTSITEID = cal.customer_account_location_id
+  inner join slv_customer.customer_account_location_role calr on calr.customer_account_location_id=cal.customer_account_location_id
+  inner join so_partysite ps on ps.PARTYSITEID = brz_cal.PARTYSITEID and ps.PARTYSITENUMBER=ca.customer_account_number
+  where (ca.dl_updated_ts > '{min_cdc_value}' or brz_cal.dl_load_date > '{min_cdc_value}' or cal.dl_updated_ts > '{min_cdc_value}' or calr.dl_updated_ts > '{min_cdc_value}' or ps.dl_load_date > '{min_cdc_value}')
+  ) as cas on cas.customer_account_number = oh.SHIP_TO_ID and cas.location_role_id='1'
+
+  union
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join slv_salesorder.sales_order_type as sot 
+  on sot.order_type_name=case when oh.order_type is null then oh.chain_type else oh.order_type end
+  where sot.dl_updated_ts > '{min_cdc_value}'
+
+  union 
+
+  select distinct oh.ORDER_HEADER_KEY 
+  from oh_sales_order as oh
+  inner join slv_salesorder.channel as ch 
+  on ch.channel_name=oh.entry_type
+  where ch.dl_updated_ts > '{min_cdc_value}'
+  
+  )
+
+  select distinct ORDER_HEADER_KEY from getIncrementalData""")
+
+# COMMAND ----------
+
+main_df = spark.sql("""
+select
+          cast(oh.ORDER_HEADER_KEY as string) as sales_order_id,
+          cast(oh.ORDER_NO as string) as sales_order_number,
+          cast(oh.currency as string) as iso_currency_code,
+          NULL as payment_method_id,
+          cast(oh.EXTN_SELLING_BRANCH as string) as sales_location_id,
+          NULL as organization_customer_id,
+          cast(e.employee_id as string) as order_entered_by_employee_id,
+          cast(oh.MODIFYUSERID as string) as order_updated_by_employee_id,
+          NULL as contract_id,
+          NULL as sales_order_method_id,
+          NULL as sales_order_classification_id,
+          cast(ch.channel_id as BIGINT) as channel_id,
+          cast(sot.sales_order_type_id as BIGINT) as sales_order_type_id,
+          cast(slvq.quote_id as BIGINT) as quote_id,
+          NULL as opportunity_id,
+          cast(wle.wesco_legal_entity_id as BIGINT) as wesco_legal_entity_id,
+          cast(cab.customer_account_location_role_id as string) as bill_to_customer_account_location_role_id,
+          cast(cas.customer_account_location_role_id as string) as ship_to_customer_account_location_role_id,
+          cast(NULL as string) as sold_to_customer_account_location_role_id,
+          cast(NULL as string) as remit_to_customer_account_location_role_id,
+          cast((CASE WHEN dso.wesco_isrname='House Account' THEN 'House Account' ELSE ei.employee_id END) as string) as inside_sales_representative_id,
+          cast((CASE WHEN dso.wesco_osrname='House Account' THEN 'House Account' ELSE eo.employee_id END) as string) as outside_sales_representative_id,
+          cast(NULL as bigint) as wesco_business_unit_id,
+          cast(NULL as bigint) as operating_group_id,
+          cast(NULL as bigint) as buyer_customer_account_contact_id,
+          cast(NULL as bigint) as sales_order_instruction_id,
+          cast(olc.ol_count as int) as number_of_order_lines,
+          cast(oh.CUSTOMER_PO_NO as string) as customer_po_number,
+          cast(to_timestamp(oh.CREATETS,'yyyyMMddHHmmss') as timestamp) as order_received_timestamp,
+          cast(to_timestamp(oh.order_date,'yyyyMMddHHmmss') as timestamp) as order_entry_timestamp,
+          NULL as customer_credit_check_timestamp,
+          cast(to_timestamp(oh.order_date,'yyyyMMddHHmmss') as timestamp) as order_confirmation_timestamp,
+          cast(to_timestamp(oh.REQ_DELIVERY_DATE,'yyyyMMddHHmmss') as timestamp) as order_requested_delivery_date,
+          NULL as order_committed_delivery_date,
+          NULL as total_paid_amount,
+          NULL as total_commissions_payable_amount,
+          NULL as split_commissions_indicator,
+          cast(to_timestamp(oh.order_date,'yyyyMMddHHmmss') as timestamp) as order_booked_date,
+          NULL as order_billed_date,
+          NULL as order_backlog_reported_date,
+          NULL as order_backlog_released_date,
+          NULL as order_cancellation_date,
+          NULL as order_returned_date,
+          NULL as shipment_to_name,
+          cast(oh.SCAC as string) as requested_shipment_carrier_name,
+          NULL as alternate_carrier_acceptable_indicator,
+          cast(oh.SCAC as string) as actual_shipment_carrier_name,
+          cast(oh.IS_LINE_SHIP_COMPLETE as boolean) as ship_order_complete_indicator,
+          NULL as total_order_weight,
+          NULL as total_order_freight_charge_amount,
+          NULL as earliest_delivery_window_timestamp,
+          NULL as latest_delivery_window_timestamp,
+          NULL as acknowledgement_required_indicator,
+          NULL as expedite_order_indicator,
+          cast(if(oh.CHAIN_TYPE ='DROP_SHIP',true,false) as boolean) as drop_shipment_indicator,
+          NULL as service_order_indicator,
+          NULL as product_order_indicator,
+          --cast(id.INSTRUCTION_TEXT as string) as order_delivery_instructions,
+          NULL as order_delivery_instructions,
+          NULL as customer_credit_check_note,
+          NULL as message_to_customer,
+          --cast(to_timestamp(sh.ACTUAL_SHIPMENT_DATE,'yyyyMMddHHmmss') as timestamp) as shipment_confirmation_timestamp,
+          NULL as shipment_confirmation_timestamp,
+          cast(to_timestamp(oh.req_ship_date,'yyyyMMddHHmmss') as timestamp) as requested_shipment_date,
+          cast(oh.ORDER_PURPOSE as string) as order_purpose,
+          cast(oh.TAX_EXEMPTION_CERTIFICATE as string) as tax_exemption_certificate_reference,
+          cast(concat(eoh.EXTN_OPERATING_GROUP_NAME,'-',eoh.EXTN_OPERATING_GROUP) as string) as sales_organization,
+          cast(eoh.EXTN_IS_GOVERNMENT_COMPLIANCE as string) as is_government_compliance_flag,
+          --cast(ol.EXTN_NEGOTIATION_NUMBER as string) as supplier_negotiation_number,
+          NULL as supplier_negotiation_number,
+          cast(oh.PAYMENT_STATUS as string) as order_payment_status_name,
+          cast(to_timestamp(oh.REQ_DELIVERY_DATE,'yyyyMMddHHmmss') as timestamp) as requested_delivery_date,
+          cast(to_timestamp(oh.req_ship_date,'yyyyMMddHHmmss') as timestamp) as requested_ship_date,
+          NULL as address_attention,
+          cast(oh.TOTAL_AMOUNT as decimal(18,5)) as order_total_amount,
+          cast(lc.total_shipping_amount as decimal(18,5)) as total_shipping_charge_amount,
+          cast(oh.TAX as decimal(18,5)) as order_total_tax_amount,
+          NULL as order_total_invoiced_amount,
+          NULL as order_total_adjustment_amount,
+          cast(wc.wesco_choicelabel as string) as sales_order_status,
+          cast(oh.DOCUMENT_TYPE as string) as sourcing_document_type,
+          cast(oh.Seller_Organization_Code as string) as seller_organization_code,
+          cast(oh.ENTERPRISE_KEY as string) as enterprise_code,
+          cast(oh.EXTN_RETURN_TYPE as string) as return_type,
+          cast(oh.EXTN_PROJECT_NUMBER as string) as project_number,
+          cast(oh.EXTN_PROGRAM_NUMBER as string) as program_number,
+          cast(NULL as string) as conversion_rate_type,
+          cast(NULL as string) as conversion_rate,
+          cast(NULL as timestamp) as conversion_rate_date,
+          cast(NULL as string) as sales_order_entered_by_employee_id,
+          cast(NULL as string) as sales_order_pick_slip,
+          cast(NULL as string) as buyer_customer_acccount_id,
+          cast(NULL as string) as order_customer_contact_id,
+          cast(dso.wesco_totalgpamount as decimal(18,5)) as gross_profit_amount,
+          cast(swl.wesco_name as string) as sales_order_return_reason_category,
+          cast(NULL as decimal) as gross_profit_percentage,
+          cast(NULL as decimal) as total_cost_amount,
+          cast(NULL as bigint) as shipment_method_id,
+          cast(NULL as string) as freight_charge_type,
+          cast(NULL as date) as latest_delivery_date,
+          cast(NULL as date) as earliest_delivery_date,
+          cast(NULL as boolean) as price_overridden_indicator,
+          cast(oh.CUSTOMER_FIRST_NAME as string) as primary_contact_fname,
+          cast(oh.CUSTOMER_LAST_NAME as string) as primary_contact_lname,
+          cast(slv_cg.Customer_Grouping_Id as bigint) as customer_grouping_id,
+          cast(eoh.extn_bir_number as string) as bir_number,
+          cast(oh.extn_is_export_order as char(1)) as international_order_flag,
+          cast(dso.wesco_ordersourcereference as string) as web_order_number,
+          cast(dso.wesco_deferredrevenue as boolean) as deferred_revenue_ind,
+          cast(eoh.EXTN_FG_ROUTING as string) as routing,
+          cast(eoh.EXTN_IS_MILESTONE_BILLING as char(1)) as milestone_billing_flag,
+          cast(
+          (
+            SELECT
+              CASE 
+                WHEN count(wcpc_sub.wesco_choicelabel) = 0 THEN NULL
+                ELSE concat_ws(': ',
+                  transform(
+                    sort_array(
+                      collect_list(
+                        struct(
+                          cast(wcpc_sub.wesco_choicevalue as bigint) as choicevalue,  
+                          wcpc_sub.wesco_choicelabel as choicelabel
+                        )
+                      )
+                    ),
+                    x -> x.choicelabel
+                  )
+                )
+              END
+            FROM wc_sales_order_compliance wcpc_sub
+            WHERE array_contains(
+              transform(
+                split(
+                  regexp_replace(coalesce(dso.wesco_governmentcompliancetype, ''), '[,;]', ','),
+                  ','
+                ),
+                x -> trim(x)
+              ),
+              cast(wcpc_sub.wesco_choicevalue as string)
+            )
+          ) as string
+          ) as govt_compliance_type,
+          cast(dso.wesco_governmentcontractnumber as string) as govt_contract_number,
+          cast(swl1.wesco_name as string) as govt_rating,
+          cast(CASE WHEN dso.wesco_ordertype = 8000001 AND dso.wesco_referencedordernumber IS NOT NULL THEN true ELSE false END as boolean) as credit_rebill_flag,          
+          cast(dso.wesco_loapprovedamount as decimal(10,2)) as loa_approved_amount,
+          cast(dso.wesco_loapprovedgppercent as decimal(10,2)) as loa_approved_GP,
+          cast(dso.wesco_loapprovaldate as timestamp) as loa_approval_date,
+          cast(loa.employee_id as bigint) as loa_approver_id,
+          cast(wc_loa.wesco_choicelabel as string) as loa_approval_status, 
+          cast(to_timestamp(oh.MODIFYTS,'yyyyMMddHHmmss') as timestamp) update_ts
+        from
+          oh_sales_order as oh             /* joins all the tables as per the requirement*/
+          left outer join eoh_sales_order as eoh on eoh.order_header_key=oh.order_header_key
+          left outer join dso_sales_order as dso on dso.ordernumber=oh.order_no
+          left outer join systemuser_v as sui on sui.systemuserid = dso.wesco_isr
+          left outer join systemuser_v as suo on suo.systemuserid = dso.wesco_osr
+          left outer join slv_hr.employee ei on ei.employee_number = sui.employeeid
+          left outer join slv_hr.employee eo on eo.employee_number = suo.employeeid
+          left outer join quote_v qv on qv.quoteid=dso.quoteid
+          left outer join slv_leadtoquote.quote slvq on slvq.quote_number = qv.quotenumber
+          left outer join slv_hr.employee e on e.employee_number = oh.ENTERED_BY
+          left outer join slv_hr.employee loa ON regexp_extract(dso.wesco_loaapprover, '[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}', 0) = loa.employee_email_address
+          and upper(loa.employee_status) = 'ACTIVE'
+          left outer join (
+            select order_header_key,count(order_line_key) as ol_count 
+            from ol_sales_order group by order_header_key
+            ) as olc on olc.order_header_key=oh.order_header_key
+          left outer join (
+            select sum(CHARGEAMOUNT) as total_shipping_amount,header_key
+            from lc_sales_order where charge_category='Shipping' group by header_key 
+            ) as lc on lc.header_key=oh.order_header_key   
+            left outer join so_wesco_lookup as swl on swl.id = dso.wesco_returnreasoncode 
+            left outer join so_wesco_lookup as swl1 on dso.wesco_governmentrating = swl1.wesco_lookupid
+            left outer join wc_sales_order as wc on wc.wesco_choicevalue = dso.wesco_orderstatus
+            left outer join wc_sales_order_loa as wc_loa on dso.wesco_loastatus = wc_loa.wesco_choicevalue
+          --left outer join brz_oms.instruction_detail as id on id.REFERENCE_KEY=oh.order_header_key and id.table_name='YFS_ORDER_HEADER'
+          left outer join slv_location.wesco_legal_entity as wle on oh.division = wle.legal_entity_name
+          left outer join slv_customer.customer_group slv_cg on slv_cg.Customer_Grouping_Guid = dso.wesco_customergroup
+          left outer join(
+          select distinct * from 
+                                  (
+                                      select
+          ca.customer_account_id,
+          ca.customer_account_number,
+          calr.customer_account_location_role_id,
+          cal.customer_account_location_id,
+          calr.location_role_id,
+          greatest(ca.dl_updated_ts,cal.dl_updated_ts,calr.dl_updated_ts) as dl_updated_ts
+          from
+          slv_customer.customer_account ca
+          inner join so_customeraccountsite brz_cal on ca.customer_account_id =brz_cal.CUSTACCOUNTID
+          inner join slv_customer.customer_account_location cal on brz_cal.CUSTACCTSITEID = cal.customer_account_location_id
+          inner join slv_customer.customer_account_location_role calr on calr.customer_account_location_id=cal.customer_account_location_id
+          inner join so_partysite ps on ps.PARTYSITEID = brz_cal.PARTYSITEID and ps.PARTYSITENUMBER=ca.customer_account_number
+          union
+          select
+          ca.customer_account_id,
+          ca.customer_account_number,
+          calr.customer_account_location_role_id,
+          cal.customer_account_location_id,
+          calr.location_role_id,
+          greatest(ca.dl_updated_ts,cal.dl_updated_ts,calr.dl_updated_ts) as dl_updated_ts
+          from
+          slv_customer.customer_account ca
+          inner join so_customeraccountsite brz_cal on ca.customer_account_id =brz_cal.CUSTACCOUNTID
+          inner join slv_customer.customer_account_location cal on brz_cal.CUSTACCTSITEID = cal.customer_account_location_id
+          inner join slv_customer.customer_account_location_role calr on calr.customer_account_location_id=cal.customer_account_location_id
+          where not exists (
+          select count(1), location_role_id 
+          from slv_customer.customer_account_location,slv_customer.customer_account_location_role
+          where customer_account_location.customer_account_id = ca.customer_account_id
+          and customer_account_location.customer_account_location_id  = customer_account_location_role.customer_account_location_id
+          and location_role_id=2 group by location_role_id having count(1)>1)
+          )
+          ) as cab on cab.customer_account_number = oh.BILL_TO_ID and cab.location_role_id='2'
+
+          left outer join (
+          select distinct * from 
+                                  (
+                                      select
+          ca.customer_account_id,
+          ca.customer_account_number,
+          calr.customer_account_location_role_id,
+          cal.customer_account_location_id,
+          calr.location_role_id,
+          greatest(ca.dl_updated_ts,cal.dl_updated_ts,calr.dl_updated_ts) as dl_updated_ts
+          from
+          slv_customer.customer_account ca
+          inner join so_customeraccountsite brz_cal on ca.customer_account_id =brz_cal.CUSTACCOUNTID
+          inner join slv_customer.customer_account_location cal on brz_cal.CUSTACCTSITEID = cal.customer_account_location_id
+          inner join slv_customer.customer_account_location_role calr on calr.customer_account_location_id=cal.customer_account_location_id
+          inner join so_partysite ps on ps.PARTYSITEID = brz_cal.PARTYSITEID and ps.PARTYSITENUMBER=ca.customer_account_number
+          union
+          select
+          ca.customer_account_id,
+          ca.customer_account_number,
+          calr.customer_account_location_role_id,
+          cal.customer_account_location_id,
+          calr.location_role_id,
+          greatest(ca.dl_updated_ts,cal.dl_updated_ts,calr.dl_updated_ts) as dl_updated_ts
+          from
+          slv_customer.customer_account ca
+          inner join so_customeraccountsite brz_cal on ca.customer_account_id =brz_cal.CUSTACCOUNTID
+          inner join slv_customer.customer_account_location cal on brz_cal.CUSTACCTSITEID = cal.customer_account_location_id
+          inner join slv_customer.customer_account_location_role calr on calr.customer_account_location_id=cal.customer_account_location_id
+          where not exists (
+          select count(1), location_role_id 
+          from slv_customer.customer_account_location,slv_customer.customer_account_location_role
+          where customer_account_location.customer_account_id = ca.customer_account_id
+          and customer_account_location.customer_account_location_id  = customer_account_location_role.customer_account_location_id
+          and location_role_id=1 group by location_role_id having count(1)>1)
+          )
+          ) as cas on cas.customer_account_number = oh.SHIP_TO_ID and cas.location_role_id='1'
+          
+
+          left outer join slv_salesorder.sales_order_type as sot on sot.order_type_name=case when oh.order_type is null then oh.chain_type else oh.order_type end
+          left outer join slv_salesorder.channel as ch on dso.wesco_ordersourcename = ch.channel_name
+          where
+          (oh.ORDER_TYPE not in ('STOCK_REPLENISHMENT', 'Supplier Return') or oh.ORDER_TYPE is null)
+          and oh.ORDER_HEADER_KEY is not null  and oh.ORDER_HEADER_KEY in (select distinct ORDER_HEADER_KEY from incremental_data)
+          /*and (oh.dl_load_date > (SELECT DATEADD(day,-5,('{min_cdc_value}'))) AND oh.dl_load_date <= cast('{max_cdc_value}' AS TIMESTAMP)
+          or dso.dl_load_date > cast('{min_cdc_value}' AS TIMESTAMP) AND dso.dl_load_date <= cast('{max_cdc_value}' AS TIMESTAMP)
+          or wc.dl_load_date > cast('{min_cdc_value}' AS TIMESTAMP) AND wc.dl_load_date <= cast('{max_cdc_value}' AS TIMESTAMP)
+          or cab.dl_updated_ts > cast('{min_cdc_value}' AS TIMESTAMP) AND cab.dl_updated_ts <= cast('{max_cdc_value}' AS TIMESTAMP)
+          or cas.dl_updated_ts > cast('{min_cdc_value}' AS TIMESTAMP) AND cas.dl_updated_ts <= cast('{max_cdc_value}' AS TIMESTAMP)
+          )*/
+""")
+
+# COMMAND ----------
+
+if Data_quality == 'Y':
+    dq = create_dq_framework(spark)
+
+    checks = [
+        dq.null_check(df = main_df, columns = ["sales_order_id"]),
+        dq.duplicate_check(df = main_df, columns = ["sales_order_id"])
+    ]
+
+    clean_df, dq_results = dq.execute_checks(df = main_df, checks = checks, table_name = "slv_salesorder.sales_order", catalog_name = catalog_name, fail_on_error = eval(fail_on_error))
+    
+    if use_clean_data == 'Y':
+        clean_df.createOrReplaceTempView("final_df")
+        print("Processing cleansed dataframe")
+    else:
+        main_df.createOrReplaceTempView("final_df")
+        print("Processing main dataframe")
+else:
+    print("Processing main dataframe")
+    main_df.createOrReplaceTempView("final_df")
+    dq_results = None
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Upsert code for sales_order
+
+# COMMAND ----------
+
+ # --> The below code performs a merge operation between selected source data with the target data
+ # --> CDC:- The incremental logic selects the data where the dl_load_date of source table is greater than the dl_updated_ts of target table
+ # --> The first part of the code selects the data from the source and handles the deduplication by picking the data of latest record
+ # --> If the merge conditions are matched then the data of the records get updated(records already exists) 
+ # --> If the merge conditions does not match then the data of the records gets inserted(new records)
+
+try:
+  spark.sql(f"""MERGE INTO slv_salesorder.sales_order as t USING(
+        select * from final_df
+  ) as s 
+  ON t.sales_order_id = s.sales_order_id    /*comparing merge keys*/
+  when matched THEN
+  UPDATE                                    /*Updated the records if merge key matches*/
+  SET
+    sales_order_number = s.sales_order_number,
+    iso_currency_code = s.iso_currency_code,
+    payment_method_id = s.payment_method_id,
+    sales_location_id = s.sales_location_id,
+    organization_customer_id = s.organization_customer_id,
+    order_entered_by_employee_id = s.order_entered_by_employee_id,
+    order_updated_by_employee_id = s.order_updated_by_employee_id,
+    contract_id = s.contract_id,
+    sales_order_method_id = s.sales_order_method_id,
+    sales_order_classification_id = s.sales_order_classification_id,
+    channel_id = s.channel_id,
+    sales_order_type_id = s.sales_order_type_id,
+    quote_id = s.quote_id,
+    opportunity_id = s.opportunity_id,
+    wesco_legal_entity_id = s.wesco_legal_entity_id,
+    bill_to_customer_account_location_role_id = s.bill_to_customer_account_location_role_id,
+    ship_to_customer_account_location_role_id = s.ship_to_customer_account_location_role_id,
+    sold_to_customer_account_location_role_id	=s.sold_to_customer_account_location_role_id,
+    remit_to_customer_account_location_role_id	=s.remit_to_customer_account_location_role_id,
+    inside_sales_representative_id = s.inside_sales_representative_id,
+    outside_sales_representative_id = s.outside_sales_representative_id,
+    wesco_business_unit_id	=s.wesco_business_unit_id,
+    operating_group_id	=s.operating_group_id,
+    buyer_customer_account_contact_id	=s.buyer_customer_account_contact_id,
+    sales_order_instruction_id	=s.sales_order_instruction_id,
+    number_of_order_lines = s.number_of_order_lines,
+    customer_po_number = s.customer_po_number,
+    order_received_timestamp = s.order_received_timestamp,
+    order_entry_timestamp = s.order_entry_timestamp,
+    customer_credit_check_timestamp = s.customer_credit_check_timestamp,
+    order_confirmation_timestamp = s.order_confirmation_timestamp,
+    order_requested_delivery_date = s.order_requested_delivery_date,
+    order_committed_delivery_date = s.order_committed_delivery_date,
+    total_paid_amount = s.total_paid_amount,
+    total_commissions_payable_amount = s.total_commissions_payable_amount,
+    split_commissions_indicator = s.split_commissions_indicator,
+    order_booked_date = s.order_booked_date,
+    order_billed_date = s.order_billed_date,
+    order_backlog_reported_date = s.order_backlog_reported_date,
+    order_backlog_released_date = s.order_backlog_released_date,
+    order_cancellation_date = s.order_cancellation_date,
+    order_returned_date = s.order_returned_date,
+    shipment_to_name = s.shipment_to_name,
+    requested_shipment_carrier_name = s.requested_shipment_carrier_name,
+    alternate_carrier_acceptable_indicator = s.alternate_carrier_acceptable_indicator,
+    actual_shipment_carrier_name = s.actual_shipment_carrier_name,
+    ship_order_complete_indicator = s.ship_order_complete_indicator,
+    total_order_weight = s.total_order_weight,
+    total_order_freight_charge_amount = s.total_order_freight_charge_amount,
+    earliest_delivery_window_timestamp = s.earliest_delivery_window_timestamp,
+    latest_delivery_window_timestamp = s.latest_delivery_window_timestamp,
+    acknowledgement_required_indicator = s.acknowledgement_required_indicator,
+    expedite_order_indicator = s.expedite_order_indicator,
+    drop_shipment_indicator = s.drop_shipment_indicator,
+    service_order_indicator = s.service_order_indicator,
+    product_order_indicator = s.product_order_indicator,
+    order_delivery_instructions = s.order_delivery_instructions,
+    customer_credit_check_note = s.customer_credit_check_note,
+    message_to_customer = s.message_to_customer,
+    shipment_confirmation_timestamp = s.shipment_confirmation_timestamp,
+    requested_shipment_date = s.requested_shipment_date,
+    order_purpose = s.order_purpose,
+    tax_exemption_certificate_reference = s.tax_exemption_certificate_reference,
+    sales_organization = s.sales_organization,
+    supplier_negotiation_number = s.supplier_negotiation_number,
+    order_payment_status_name = s.order_payment_status_name,
+    requested_delivery_date = s.requested_delivery_date,
+    requested_ship_date = s.requested_ship_date,
+    address_attention = s.address_attention,
+    order_total_amount = s.order_total_amount,
+    total_shipping_charge_amount = s.total_shipping_charge_amount,
+    order_total_tax_amount = s.order_total_tax_amount,
+    order_total_invoiced_amount = s.order_total_invoiced_amount,
+    order_total_adjustment_amount = s.order_total_adjustment_amount,
+    sales_order_status	=s.sales_order_status,
+    sourcing_document_type	=s.sourcing_document_type,
+    seller_organization_code	=s.seller_organization_code,
+    enterprise_code =s.enterprise_code,
+    return_type =s.return_type,
+    project_number=s.project_number,
+    program_number=s.program_number,
+    conversion_rate_type	=s.conversion_rate_type,
+    conversion_rate	=s.conversion_rate,
+    conversion_rate_date	=s.conversion_rate_date,
+    sales_order_entered_by_employee_id	=s.sales_order_entered_by_employee_id,
+    sales_order_pick_slip	=s.sales_order_pick_slip,
+    buyer_customer_acccount_id	=s.buyer_customer_acccount_id,
+    order_customer_contact_id	=s.order_customer_contact_id,
+    gross_profit_amount	=s.gross_profit_amount,
+    sales_order_return_reason_category =s.sales_order_return_reason_category,
+    gross_profit_percentage	=s.gross_profit_percentage,
+    total_cost_amount	=s.total_cost_amount,
+    shipment_method_id	=s.shipment_method_id,
+    freight_charge_type	=s.freight_charge_type,
+    latest_delivery_date	=s.latest_delivery_date,
+    earliest_delivery_date	=s.earliest_delivery_date,
+    price_overridden_indicator	=s.price_overridden_indicator,
+    is_government_compliance_flag = s.is_government_compliance_flag,
+    primary_contact_fname =s.primary_contact_fname,
+    primary_contact_lname =s.primary_contact_lname,
+    customer_grouping_id=s.customer_grouping_id,
+    bir_number = s.bir_number,
+    international_order_flag = s.international_order_flag,
+    web_order_number = s.web_order_number,
+    deferred_revenue_ind = s.deferred_revenue_ind,
+    routing = s.routing,
+    milestone_billing_flag = s.milestone_billing_flag,
+    govt_compliance_type=s.govt_compliance_type,
+    govt_contract_number=s.govt_contract_number,
+    govt_rating=s.govt_rating,
+    credit_rebill_flag = s.credit_rebill_flag,
+    loa_approved_amount = s.loa_Approved_amount,
+    loa_approved_GP = s.loa_approved_GP,
+    loa_approval_date = s.loa_approval_date,
+    loa_approver_id = s.loa_approver_id,
+    loa_approval_status = s.loa_approval_status,
+    update_ts=s.update_ts,
+    dl_updated_ts = '{max_cdc_value}'
+    WHEN NOT MATCHED THEN
+  INSERT(                                                    /*Inserts the records if merge key does not match*/
+      sales_order_id,
+      sales_order_number,
+      iso_currency_code,
+      payment_method_id,
+      sales_location_id,
+      organization_customer_id,
+      order_entered_by_employee_id,
+      order_updated_by_employee_id,
+      contract_id,
+      sales_order_method_id,
+      sales_order_classification_id,
+      channel_id,
+      sales_order_type_id,
+      quote_id,
+      opportunity_id,
+      wesco_legal_entity_id,
+      bill_to_customer_account_location_role_id,
+      ship_to_customer_account_location_role_id,
+      sold_to_customer_account_location_role_id,
+      remit_to_customer_account_location_role_id,
+      inside_sales_representative_id,
+      outside_sales_representative_id,
+      wesco_business_unit_id,
+      operating_group_id,
+      buyer_customer_account_contact_id,
+      sales_order_instruction_id,
+      number_of_order_lines,
+      customer_po_number,
+      order_received_timestamp,
+      order_entry_timestamp,
+      customer_credit_check_timestamp,
+      order_confirmation_timestamp,
+      order_requested_delivery_date,
+      order_committed_delivery_date,
+      total_paid_amount,
+      total_commissions_payable_amount,
+      split_commissions_indicator,
+      order_booked_date,
+      order_billed_date,
+      order_backlog_reported_date,
+      order_backlog_released_date,
+      order_cancellation_date,
+      order_returned_date,
+      shipment_to_name,
+      requested_shipment_carrier_name,
+      alternate_carrier_acceptable_indicator,
+      actual_shipment_carrier_name,
+      ship_order_complete_indicator,
+      total_order_weight,
+      total_order_freight_charge_amount,
+      earliest_delivery_window_timestamp,
+      latest_delivery_window_timestamp,
+      acknowledgement_required_indicator,
+      expedite_order_indicator,
+      drop_shipment_indicator,
+      service_order_indicator,
+      product_order_indicator,
+      order_delivery_instructions,
+      customer_credit_check_note,
+      message_to_customer,
+      shipment_confirmation_timestamp,
+      requested_shipment_date,
+      order_purpose,
+      tax_exemption_certificate_reference,
+      sales_organization,
+      supplier_negotiation_number,
+      order_payment_status_name,
+      requested_delivery_date,
+      requested_ship_date,
+      address_attention,
+      order_total_amount,
+      total_shipping_charge_amount,
+      order_total_tax_amount,
+      order_total_invoiced_amount,
+      order_total_adjustment_amount,
+      sales_order_status,
+      sourcing_document_type,
+      seller_organization_code,
+      enterprise_code,
+      return_type,
+      project_number,
+      program_number,
+      conversion_rate_type,
+      conversion_rate,
+      conversion_rate_date,
+      sales_order_entered_by_employee_id,
+      sales_order_pick_slip,
+      buyer_customer_acccount_id,
+      order_customer_contact_id,
+      gross_profit_amount,
+      sales_order_return_reason_category,
+      gross_profit_percentage,
+      total_cost_amount,
+      shipment_method_id,
+      freight_charge_type,
+      latest_delivery_date,
+      earliest_delivery_date,
+      price_overridden_indicator,
+      is_government_compliance_flag,
+      primary_contact_fname,
+      primary_contact_lname,
+      customer_grouping_id,
+      bir_number,
+      international_order_flag,
+      web_order_number,
+      deferred_revenue_ind,
+      routing,
+      milestone_billing_flag,
+      govt_compliance_type,
+      govt_contract_number,
+      govt_rating,
+      credit_rebill_flag,
+      loa_Approved_Amount,
+      loa_Approved_GP,
+      loa_Approval_Date,
+      loa_Approver_Id,
+      loa_Approval_Status,
+      update_ts,
+      dl_load_ts,
+      dl_updated_ts
+    )
+  values(
+      s.sales_order_id,
+      s.sales_order_number,
+      s.iso_currency_code,
+      s.payment_method_id,
+      s.sales_location_id,
+      s.organization_customer_id,
+      s.order_entered_by_employee_id,
+      s.order_updated_by_employee_id,
+      s.contract_id,
+      s.sales_order_method_id,
+      s.sales_order_classification_id,
+      s.channel_id,
+      s.sales_order_type_id,
+      s.quote_id,
+      s.opportunity_id,
+      s.wesco_legal_entity_id,
+      s.bill_to_customer_account_location_role_id,
+      s.ship_to_customer_account_location_role_id,
+      s.sold_to_customer_account_location_role_id,
+      s.remit_to_customer_account_location_role_id,
+      s.inside_sales_representative_id,
+      s.outside_sales_representative_id,
+      s.wesco_business_unit_id,
+      s.operating_group_id,
+      s.buyer_customer_account_contact_id,
+      s.sales_order_instruction_id,
+      s.number_of_order_lines,
+      s.customer_po_number,
+      s.order_received_timestamp,
+      s.order_entry_timestamp,
+      s.customer_credit_check_timestamp,
+      s.order_confirmation_timestamp,
+      s.order_requested_delivery_date,
+      s.order_committed_delivery_date,
+      s.total_paid_amount,
+      s.total_commissions_payable_amount,
+      s.split_commissions_indicator,
+      s.order_booked_date,
+      s.order_billed_date,
+      s.order_backlog_reported_date,
+      s.order_backlog_released_date,
+      s.order_cancellation_date,
+      s.order_returned_date,
+      s.shipment_to_name,
+      s.requested_shipment_carrier_name,
+      s.alternate_carrier_acceptable_indicator,
+      s.actual_shipment_carrier_name,
+      s.ship_order_complete_indicator,
+      s.total_order_weight,
+      s.total_order_freight_charge_amount,
+      s.earliest_delivery_window_timestamp,
+      s.latest_delivery_window_timestamp,
+      s.acknowledgement_required_indicator,
+      s.expedite_order_indicator,
+      s.drop_shipment_indicator,
+      s.service_order_indicator,
+      s.product_order_indicator,
+      s.order_delivery_instructions,
+      s.customer_credit_check_note,
+      s.message_to_customer,
+      s.shipment_confirmation_timestamp,
+      s.requested_shipment_date,
+      s.order_purpose,
+      s.tax_exemption_certificate_reference,
+      s.sales_organization,
+      s.supplier_negotiation_number,
+      s.order_payment_status_name,
+      s.requested_delivery_date,
+      s.requested_ship_date,
+      s.address_attention,
+      s.order_total_amount,
+      s.total_shipping_charge_amount,
+      s.order_total_tax_amount,
+      s.order_total_invoiced_amount,
+      s.order_total_adjustment_amount,
+      s.sales_order_status,
+      s.sourcing_document_type,
+      s.seller_organization_code,
+      s.enterprise_code,
+      s.return_type,
+      s.project_number,
+      s.program_number,
+      s.conversion_rate_type,
+      s.conversion_rate,
+      s.conversion_rate_date,
+      s.sales_order_entered_by_employee_id,
+      s.sales_order_pick_slip,
+      s.buyer_customer_acccount_id,
+      s.order_customer_contact_id,
+      s.gross_profit_amount,
+      s.sales_order_return_reason_category,
+      s.gross_profit_percentage,
+      s.total_cost_amount,
+      s.shipment_method_id,
+      s.freight_charge_type,
+      s.latest_delivery_date,
+      s.earliest_delivery_date,
+      s.price_overridden_indicator,
+      s.is_government_compliance_flag,
+      s.primary_contact_fname,
+      s.primary_contact_lname,
+      s.customer_grouping_id,
+      s.bir_number,
+      s.international_order_flag,
+      s.web_order_number,
+      s.deferred_revenue_ind,
+      s.routing,
+      s.milestone_billing_flag,
+      s.govt_compliance_type,
+      s.govt_contract_number,
+      s.govt_rating,
+      s.credit_rebill_flag,
+      s.loa_Approved_Amount,
+      s.loa_Approved_GP,
+      s.loa_Approval_Date,
+      s.loa_Approver_Id,
+      s.loa_Approval_Status,
+      s.update_ts,
+      '{max_cdc_value}',
+      '{max_cdc_value}'
+    )
+  """)
+  results = {
+        "Status": "Success",
+        "dq_summary": dq_results,
+        "cdc_value": str(max_cdc_value)
+  }
+  dbutils.notebook.exit(json.dumps(results))
+
+except Exception as e:
+    results = {
+        "Status": "Failed",
+        "error_message": str(e),
+        "cdc_value": str(min_cdc_value)
+        # ,
+        # "dq_summary": dq_results
+    }
+    raise Exception(json.dumps(results))
