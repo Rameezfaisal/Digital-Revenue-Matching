@@ -1,0 +1,1 @@
+[UNRESOLVED_COLUMN.WITH_SUGGESTION] A column, variable, or function parameter with name `sf`.`flex_1` cannot be resolved. Did you mean one of the following? [`uof`.`flex_1`, `sf`.`row_num`, `sf`.`currency`, `sf`.`branch_id`, `sf`.`quantity`]. SQLSTATE: 42703
