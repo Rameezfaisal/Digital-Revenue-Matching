@@ -1,0 +1,60 @@
+-- 1. Create the schema (if it doesn't already exist)
+CREATE SCHEMA IF NOT EXISTS gld_eudm;
+
+-- 2. Create the main reporting table
+CREATE TABLE IF NOT EXISTS gld_eudm.digital_dashboard_control (
+    datasource_num_id BIGINT,
+    sbu STRING,
+    ent_type STRING,
+    rollup_category STRING,
+    date_invoice DATE,
+    total_no_of_sales BIGINT,
+    sales_amount DECIMAL(38,2),
+    currency STRING,
+    data_source_name STRING,
+    cust_name STRING,
+    invoice_no STRING,
+    order_number STRING,
+    currency_conversion DECIMAL(18,6),
+    sales_amount_USD DECIMAL(38,2),
+    CREATE_DATE DATE
+)
+USING DELTA
+-- LIQUID CLUSTERING: Databricks' modern replacement for partitioning. 
+-- It automatically optimizes file sizes based on how the dashboard filters data.
+CLUSTER BY (date_invoice, datasource_num_id, sbu)
+TBLPROPERTIES (
+    'delta.autoOptimize.optimizeWrite' = 'true',
+    'delta.autoOptimize.autoCompact' = 'true',
+    'delta.deletedFileRetentionDuration' = 'interval 7 days'
+);
+
+-- 3. Create the Control / Watermark table (required for incremental logic)
+CREATE TABLE IF NOT EXISTS gld_eudm.udm_view_load (
+    view_name STRING,
+    datasource_num_id BIGINT,
+    max_date_loaded DATE,
+    updated_at TIMESTAMP
+)
+USING DELTA;
+
+-- 4. Seed the Control table (Run this once to establish the initial baseline)
+-- Adjust the baseline date ('2023-01-01') to match your actual historical cutoff
+INSERT INTO gld_eudm.udm_view_load (view_name, datasource_num_id, max_date_loaded, updated_at)
+VALUES 
+    ('DIGITAL_DASHBOARD_CONTROL', 3000, '2023-01-01', current_timestamp()),
+    ('DIGITAL_DASHBOARD_CONTROL', 4000, '2023-01-01', current_timestamp()),
+    ('DIGITAL_DASHBOARD_CONTROL', 5000, '2023-01-01', current_timestamp()),
+    ('DIGITAL_DASHBOARD_CONTROL', 6000, '2023-01-01', current_timestamp()),
+    ('DIGITAL_DASHBOARD_CONTROL', 7000, '2023-01-01', current_timestamp()),
+    ('DIGITAL_DASHBOARD_CONTROL', 8000, '2023-01-01', current_timestamp()),
+    ('DIGITAL_DASHBOARD_CONTROL', 9000, '2023-01-01', current_timestamp()),
+    ('DIGITAL_DASHBOARD_CONTROL', 10000, '2023-01-01', current_timestamp()),
+    ('DIGITAL_DASHBOARD_CONTROL', 11000, '2023-01-01', current_timestamp()),
+    ('DIGITAL_DASHBOARD_CONTROL', 12001, '2023-01-01', current_timestamp()),
+    ('DIGITAL_DASHBOARD_CONTROL', 12002, '2023-01-01', current_timestamp()),
+    ('DIGITAL_DASHBOARD_CONTROL', 12003, '2023-01-01', current_timestamp()),
+    ('DIGITAL_DASHBOARD_CONTROL', 12004, '2023-01-01', current_timestamp()),
+    ('DIGITAL_DASHBOARD_CONTROL', 12005, '2023-01-01', current_timestamp()),
+    ('DIGITAL_DASHBOARD_CONTROL', 13000, '2023-01-01', current_timestamp()),
+    ('DIGITAL_DASHBOARD_CONTROL', 14000, '2023-01-01', current_timestamp());
