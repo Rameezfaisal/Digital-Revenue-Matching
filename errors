@@ -1,1 +1,21 @@
-[UNRESOLVED_COLUMN.WITH_SUGGESTION] A column, variable, or function parameter with name `customer_po_no` cannot be resolved. Did you mean one of the following? [`invoice_no`, `ent_type`, `flex_1`, `row_num`, `sales_order_no`]. SQLSTATE: 42703
+# COMMAND ----------
+
+spark.sql(f"""
+CREATE OR REPLACE TEMPORARY VIEW of_order_fact AS
+SELECT * FROM (
+    SELECT *,
+    row_number() OVER (
+        PARTITION BY datasource_num_id, sales_order_no, branch_id
+        ORDER BY order_updated_ts DESC
+    ) AS row_num
+    FROM (
+        SELECT
+            datasource_num_id, sales_order_no, branch_id, order_integration_id, flex_1,
+            ent_type, invoice_no, date_invoice, WesnetLine, dl_load_date, order_updated_ts,
+            customer_po_no  -- <--- Added missing column here
+        FROM brz_teradata.udm_order_fact
+        WHERE dl_load_date > '{min_cdc_value}'
+    )
+)
+WHERE row_num = 1
+""")
