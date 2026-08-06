@@ -1,480 +1,348 @@
-Here is the complete, converted PySpark notebook code designed for Databricks.
-Key Architectural Improvements Made for Databricks:
- * Control Flow via Python (Huge Compute Saver): The Teradata script adds an EXISTS clause to every single query to check if today is the 6th working day. In Databricks, we evaluate this once at the top of the notebook. If it's not the 6th workday, the notebook exits immediately without spinning up heavy compute resources.
- * Spark SQL Syntax Updates:
-   * nvl() converted to standard coalesce().
-   * || concatenation converted to concat().
-   * To_date(TO_CHAR(Current_date, 'YYYY-MM')||'-01') simplified natively to trunc(current_date(), 'MM').
-   * DATE keywords converted to current_date().
- * Dataframe Union Pattern: Per your request, each source creates its own dataframe view, which are all merged into main_df using .unionByName() before a final incremental append.
-Databricks Notebook: digital_dashboard_control_load
-# COMMAND ----------
+this is my notebook code check is there anything missing compared to teradata script i provided you earlier if yes then give me the code snippet and tell where to add this code as the count is not matching 
+
+# Databricks notebook source
 # MAGIC %md
-# MAGIC ## Setup & Configuration
-# MAGIC Defining schemas and initializing the incremental load process.
+# MAGIC Name        : slv_salesorder.digital_dashboard_control <br/>
+# MAGIC Catalog     : WESCO, ATC <br/>
+# MAGIC Description : This notebook will be creating digital_dashboard_control for digital_dashboard_control_summary table <br/>
+# MAGIC Job ID:  <br/>
+# MAGIC Operation ID:  <br/>
+# MAGIC
+# MAGIC #### Change History - Must be updated for every change.<br/>
+# MAGIC |Version|Author|Date|Ticket|Short Description|
+# MAGIC |-------|------|----|------|-----------------|
+# MAGIC |1.0|Rameez|21-July-2026|DL-14769|Added new columns mapped from brz_mdm_location.mdmsaas_locationmaster_ddp.selling_location|
 
 # COMMAND ----------
 
-# Define schemas
-source_schema = "gld_eudm" # Adjust if raw tables are in bronze/silver
-target_schema = "gld_eudm"
+dbutils.widgets.text("parameter_dictionary","""{"businessunit":"wesco","reload": "Y","Data_quality":"N","fail_on_error":"True","use_clean_data":"Y"}""")
+dbutils.widgets.text("cdc_column","dl_updated_ts")
+dbutils.widgets.text("cdc_value","1900-01-01 00:00:00.000")
 
 # COMMAND ----------
-# MAGIC %md
-# MAGIC ## Step 1: Run Condition Check (6th Work Day)
-# MAGIC Instead of checking this inside every single SQL query (like Teradata), we evaluate it once. If false, we exit gracefully and save compute costs.
+
+# MAGIC %run /Workspace/DE-Transformation/utilities/job_parameters_and_environment_configuration
 
 # COMMAND ----------
+
+from datetime import datetime
+
+# set min and max timestamp for incremental data
+
+min_cdc_value = cdc_value
+max_cdc_value = datetime.now()
+print(f"{min_cdc_value} | {max_cdc_value}")
+
+# COMMAND ----------
+
+#Truncation for full reload
+if reload == 'Y':
+    print("Truncating data before load")
+    spark.sql(f"""TRUNCATE TABLE slv_salesorder.digital_dashboard_control""")
+    min_cdc_value = spark.sql(f"""select cast('1900-01-01T00:00:00.000+0000' as timestamp)""").collect()[0][0]
+else:
+    print("Incremental load")
+
+# COMMAND ----------
+
+# Check Run Condition (6th Work Day) - Exits early if condition is not met
 
 check_workday_df = spark.sql(f"""
-    SELECT count(*) as valid_day 
-    FROM {source_schema}.calendar_work_day 
-    WHERE day_of_month = 6 AND calendar_date = current_date()
+SELECT count(*) as valid_day
+FROM brz_teradata.calendar_work_day
+WHERE day_of_month = 6 AND calendar_date = current_date()
 """)
 
-is_valid_day = check_workday_df.collect()[0]["valid_day"] > 0
-
-if not is_valid_day:
-    dbutils.notebook.exit("Today is not the 6th working day. Skipping load.")
-    
-print("Run condition met. Proceeding with incremental load.")
-
-# COMMAND ----------
-# MAGIC %md
-# MAGIC ## Step 2: Update Control Table (Watermark)
-# MAGIC Mimicking the Teradata UPDATE statement. Updates the `udm_view_load` table with the current max dates from the target table before the new data is loaded.
+if check_workday_df.collect()[0]["valid_day"] == 0:
+    dbutils.notebook.exit('{"Status": "Skipped", "Reason": "Today is not the 6th working day."}')
+    print("Run condition met. Proceeding with load.")
 
 # COMMAND ----------
 
 spark.sql(f"""
-    MERGE INTO {target_schema}.udm_view_load tgt
-    USING (
-        SELECT datasource_num_id, max(date_invoice) as max_date_loaded 
-        FROM {target_schema}.digital_dashboard_control
-        GROUP BY datasource_num_id
-    ) src
-    ON tgt.datasource_num_id = src.datasource_num_id 
-       AND UPPER(tgt.view_name) = 'DIGITAL_DASHBOARD_CONTROL'
-    WHEN MATCHED THEN 
-        UPDATE SET tgt.max_date_loaded = src.max_date_loaded
+CREATE OR REPLACE TEMPORARY VIEW sf_sales_fact AS
+SELECT * FROM (
+SELECT *,
+row_number() OVER (
+PARTITION BY datasource_num_id, invoice_no, order_number, branch_id
+ORDER BY updated_ts DESC
+) AS row_num
+FROM (
+SELECT
+datasource_num_id, branch_id, date_invoice, sales_amount, currency, customer_dim_key,
+invoice_no, wesnet_order_no, order_number, order_integration_id, accounting_include_flag,
+sales_transfer_flag, kit_component_flag, sim_description, inventory_org_code,
+cost_amount, quantity, market_cost, transaction_type, invoice_line_no, conversion_rate,
+budget_conversion_rate, dl_load_date, updated_ts
+FROM brz_teradata.udm_sales_fact 
+where dl_load_date > '{min_cdc_value}'
+)
+)
+WHERE row_num = 1
 """)
 
-# Create a Temp View of the control table for easy joining in the subsequent queries
+# COMMAND ----------
+
 spark.sql(f"""
-    CREATE OR REPLACE TEMP VIEW v_view_load AS
-    SELECT datasource_num_id, max_date_loaded
-    FROM {target_schema}.udm_view_load
-    WHERE UPPER(view_name) = 'DIGITAL_DASHBOARD_CONTROL'
+CREATE OR REPLACE TEMPORARY VIEW of_order_fact AS
+SELECT * FROM (
+SELECT *,
+row_number() OVER (
+PARTITION BY datasource_num_id, sales_order_no, branch_id
+ORDER BY order_updated_ts DESC
+) AS row_num
+FROM (
+SELECT
+datasource_num_id, sales_order_no, branch_id, order_integration_id, flex_1,
+ent_type, invoice_no, date_invoice, WesnetLine, dl_load_date, order_updated_ts
+FROM brz_teradata.udm_order_fact
+where dl_load_date > '{min_cdc_value}'
+)
+)
+WHERE row_num = 1
 """)
 
 # COMMAND ----------
-# MAGIC %md
-# MAGIC ## Step 3: Extract & Transform Sources
 
-# COMMAND ----------
-
-# 1. WESNET (3000)
-df_wesnet = spark.sql(f"""
-SELECT sf.datasource_num_id,
-  (SELECT bd.sbu FROM {source_schema}.branch_dim bd WHERE sf.branch_id = bd.branch_id LIMIT 1) as sbu,
-  uof.flex_1 as ent_type,
-  (SELECT doc.rollup_category FROM {source_schema}.udm_digital_channel_code_dim doc 
-   WHERE doc.ent_type = uof.flex_1 AND doc.datasource_num_id = uof.datasource_num_id LIMIT 1) as rollup_category,
-  sf.date_invoice, 
-  count(*) as total_no_of_sales,
-  sum(sf.sales_amount) as sales_amount,
-  sf.currency,
-  (SELECT dt.datasource_description FROM {source_schema}.datasource_tbl dt WHERE dt.datasource_num_id = sf.datasource_num_id LIMIT 1) as data_source_name,
-  concat(cus.customer_no, '_', cus.customer_name) as cust_name,
-  sf.invoice_no,
-  sf.wesnet_order_no as order_number,
-  CASE WHEN sf.currency = 'USD' THEN 1
-       ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv 
-             WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' 
-             AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) 
-  END as currency_conversion,
-  (cast(sum(sf.sales_amount) as DECIMAL(38,2)) * 
-   CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END
-  ) as sales_amount_USD,
-  current_date() as CREATE_DATE
-FROM {source_schema}.udm_sales_fact sf
-LEFT OUTER JOIN (SELECT distinct sales_order_no, branch_id, datasource_num_id, order_integration_id, flex_1 FROM {source_schema}.udm_order_fact) uof
-  ON (uof.sales_order_no = sf.wesnet_order_no AND uof.datasource_num_id = sf.datasource_num_id AND uof.branch_id = sf.branch_id AND uof.order_integration_id = sf.order_integration_id)
-LEFT OUTER JOIN {source_schema}.udm_customer_dim cus ON sf.customer_dim_key = cus.customer_dim_key
-WHERE sf.datasource_num_id = 3000 
-  AND sf.date_invoice > (SELECT max_date_loaded FROM v_view_load WHERE datasource_num_id = 3000) 
-  AND sf.date_invoice < trunc(current_date(), 'MM')
-  AND sf.accounting_include_flag = 'Y'
-  AND coalesce(sf.sales_transfer_flag, 'N') <> 'Y'
-  AND coalesce(sf.kit_component_flag, 'N') <> 'C'
-  AND left(cus.customer_no, 1) <> 'X'
-  AND sf.sim_description <> 'Datacom Redaction'
-  AND coalesce(sf.inventory_org_code, '') <> 'SCS'
-  AND (sf.sales_amount <> 0 OR sf.cost_amount <> 0 OR sf.quantity <> 0 OR sf.market_cost <> 0)
-  AND sf.transaction_type <> 'X99'
-GROUP BY sf.datasource_num_id, uof.flex_1, sbu, rollup_category, sf.date_invoice, sf.currency, 
-         cus.customer_name, cus.customer_no, sf.invoice_no, sf.wesnet_order_no, data_source_name, currency_conversion
-HAVING sum(sf.sales_amount) <> 0
-""")
-
-# 2. LIBERTY (5000)
-df_liberty = spark.sql(f"""
-SELECT sf.datasource_num_id,
-  (SELECT bd.sbu FROM {source_schema}.branch_dim bd WHERE sf.branch_id = bd.branch_id LIMIT 1) as sbu,
-  uof.ent_type as ent_type,
-  (SELECT doc.rollup_category FROM {source_schema}.udm_digital_channel_code_dim doc 
-   WHERE doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id LIMIT 1) as rollup_category,
-  sf.date_invoice, 
-  count(distinct sf.order_number) as total_no_of_sales,
-  sum(sf.sales_amount) as sales_amount,
-  sf.currency,
-  (SELECT dt.datasource_description FROM {source_schema}.datasource_tbl dt WHERE dt.datasource_num_id = sf.datasource_num_id LIMIT 1) as data_source_name,
-  concat(cus.customer_no, '_', cus.customer_name) as cust_name,
-  sf.invoice_no, sf.order_number,
-  CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END as currency_conversion,
-  (cast(sum(sf.sales_amount) as DECIMAL(38,2)) * CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END) as sales_amount_USD,
-  current_date() as CREATE_DATE
-FROM {source_schema}.udm_sales_fact sf
-LEFT OUTER JOIN (SELECT distinct ent_type, sales_order_no, branch_id FROM {source_schema}.udm_order_fact WHERE datasource_num_id = '5000') uof ON (uof.sales_order_no = sf.order_number AND sf.branch_id = uof.branch_id)
-LEFT OUTER JOIN {source_schema}.udm_customer_dim cus ON sf.customer_dim_key = cus.customer_dim_key
-WHERE sf.datasource_num_id = 5000
-  AND sf.date_invoice > (SELECT max_date_loaded FROM v_view_load WHERE datasource_num_id = 5000) 
-  AND sf.date_invoice < trunc(current_date(), 'MM')
-GROUP BY sf.datasource_num_id, uof.ent_type, sbu, rollup_category, sf.date_invoice, sf.currency, 
-         cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, data_source_name, currency_conversion
-HAVING sum(sf.sales_amount) <> 0
-""")
-
-# 3. ERP (9000)
-df_erp = spark.sql(f"""
-SELECT sf.datasource_num_id,
-  (SELECT bd.sbu FROM {source_schema}.branch_dim bd WHERE sf.branch_id = bd.branch_id LIMIT 1) as sbu,
-  uof.ent_type as ent_type,
-  (SELECT doc.rollup_category FROM {source_schema}.udm_digital_channel_code_dim doc WHERE doc.ent_type = uof.ent_type AND doc.datasource_num_id = uof.datasource_num_id LIMIT 1) as rollup_category,
-  sf.date_invoice, count(*) as total_no_of_sales, sum(sf.sales_amount) as sales_amount, sf.currency,
-  (SELECT dt.datasource_description FROM {source_schema}.datasource_tbl dt WHERE dt.datasource_num_id = sf.datasource_num_id LIMIT 1) as data_source_name,
-  concat(cus.customer_no, '_', cus.customer_name) as cust_name, sf.invoice_no, sf.order_number,
-  CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END as currency_conversion,
-  (cast(sum(sf.sales_amount) as DECIMAL(38,2)) * CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END) as sales_amount_USD,
-  current_date() as CREATE_DATE
-FROM {source_schema}.udm_sales_fact sf
-LEFT OUTER JOIN (SELECT distinct sales_order_no, datasource_num_id, branch_id, ent_type FROM {source_schema}.udm_order_fact) uof ON (uof.sales_order_no = sf.order_number AND uof.datasource_num_id = sf.datasource_num_id)
-LEFT OUTER JOIN {source_schema}.udm_customer_dim cus ON sf.customer_dim_key = cus.customer_dim_key
-WHERE sf.datasource_num_id = 9000
-  AND sf.date_invoice > (SELECT max_date_loaded FROM v_view_load WHERE datasource_num_id = 9000) 
-  AND sf.date_invoice < trunc(current_date(), 'MM')
-  AND coalesce(sf.sales_transfer_flag, 'N') <> 'Y'
-  AND coalesce(sf.kit_component_flag, 'N') <> 'C'
-  AND left(cus.customer_no, 1) <> 'X'
-  AND sf.sim_description <> 'Datacom Redaction'
-  AND (sf.sales_amount <> 0 OR sf.cost_amount <> 0 OR sf.quantity <> 0 OR sf.market_cost <> 0)
-  AND sf.transaction_type <> 'X99'
-GROUP BY sf.datasource_num_id, uof.ent_type, sbu, rollup_category, sf.date_invoice, sf.currency, 
-         cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, data_source_name, currency_conversion
-HAVING sum(sf.sales_amount) <> 0
-""")
-
-# 4. Conney (13000)
-df_conney = spark.sql(f"""
-SELECT sf.datasource_num_id,
-  (SELECT bd.sbu FROM {source_schema}.branch_dim bd WHERE sf.branch_id = bd.branch_id LIMIT 1) as sbu,
-  uof.ent_type as ent_type,
-  (SELECT doc.rollup_category FROM {source_schema}.udm_digital_channel_code_dim doc WHERE doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id LIMIT 1) as rollup_category,
-  sf.date_invoice, count(distinct sf.order_number) as total_no_of_sales, sum(sf.sales_amount) as sales_amount, sf.currency,
-  (SELECT dt.datasource_description FROM {source_schema}.datasource_tbl dt WHERE dt.datasource_num_id = sf.datasource_num_id LIMIT 1) as data_source_name,
-  concat(cus.customer_no, '_', cus.customer_name) as cust_name, sf.invoice_no, sf.order_number,
-  CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END as currency_conversion,
-  (cast(sum(sf.sales_amount) as DECIMAL(38,2)) * CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END) as sales_amount_USD,
-  current_date() as CREATE_DATE
-FROM {source_schema}.udm_sales_fact sf
-LEFT OUTER JOIN (SELECT distinct ent_type, sales_order_no, branch_id FROM {source_schema}.udm_order_fact WHERE datasource_num_id = '13000' AND ent_type IN (SELECT doc.ent_type FROM {source_schema}.udm_digital_channel_code_dim doc WHERE doc.datasource_num_id = 13000 AND rollup_category IN ('Websites','Materials Management','Integrations'))) uof ON (uof.sales_order_no = sf.order_number AND sf.branch_id = uof.branch_id)
-LEFT OUTER JOIN {source_schema}.udm_customer_dim cus ON sf.customer_dim_key = cus.customer_dim_key
-WHERE sf.datasource_num_id = 13000
-  AND sf.date_invoice > (SELECT max_date_loaded FROM v_view_load WHERE datasource_num_id = 13000) 
-  AND sf.date_invoice < trunc(current_date(), 'MM')
-  AND coalesce(cus.intercompany_customer, 'N') = 'N'
-  AND sf.accounting_include_flag = 'Y'
-  AND coalesce(sf.sales_transfer_flag, 'N') <> 'Y'
-  AND coalesce(sf.kit_component_flag, 'N') <> 'C'
-GROUP BY sf.datasource_num_id, uof.ent_type, sbu, rollup_category, sf.date_invoice, sf.currency, 
-         cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, data_source_name, currency_conversion
-HAVING sum(sf.sales_amount) <> 0
-""")
-
-# 5. EECOL (11000)
-df_eecol = spark.sql(f"""
-SELECT sf.datasource_num_id,
-  (SELECT bd.sbu FROM {source_schema}.branch_dim bd WHERE sf.branch_id = bd.branch_id LIMIT 1) as sbu,
-  uof.ent_type as ent_type,
-  (SELECT doc.rollup_category FROM {source_schema}.udm_digital_channel_code_dim doc WHERE REGEXP_REPLACE(doc.ent_type, '       ', '') = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id LIMIT 1) as rollup_category,
-  sf.date_invoice, count(distinct sf.order_number) as total_no_of_sales, sum(sf.sales_amount) as sales_amount, sf.currency,
-  (SELECT dt.datasource_description FROM {source_schema}.datasource_tbl dt WHERE dt.datasource_num_id = sf.datasource_num_id LIMIT 1) as data_source_name,
-  concat(cus.customer_no, '_', cus.customer_name) as cust_name, sf.invoice_no, sf.order_number,
-  CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END as currency_conversion,
-  (cast(sum(sf.sales_amount) as DECIMAL(38,2)) * CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END) as sales_amount_USD,
-  current_date() as CREATE_DATE
-FROM {source_schema}.udm_sales_fact sf
-LEFT OUTER JOIN (SELECT distinct ent_type, sales_order_no, branch_id, WesnetLine FROM {source_schema}.udm_order_fact WHERE datasource_num_id = '11000') uof ON (cast(uof.sales_order_no as bigint) = cast(sf.order_number as bigint) AND sf.branch_id = uof.branch_id AND uof.WesnetLine = sf.invoice_line_no)
-LEFT OUTER JOIN {source_schema}.udm_customer_dim cus ON sf.customer_dim_key = cus.customer_dim_key
-WHERE sf.datasource_num_id = 11000
-  AND sf.date_invoice > (SELECT max_date_loaded FROM v_view_load WHERE datasource_num_id = 11000) 
-  AND sf.date_invoice < trunc(current_date(), 'MM')
-  AND coalesce(cus.intercompany_customer, 'N') = 'N'
-GROUP BY sf.datasource_num_id, uof.ent_type, sbu, rollup_category, sf.date_invoice, sf.currency, 
-         cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, data_source_name, currency_conversion
-HAVING sum(sf.sales_amount) <> 0
-""")
-
-# 6. Hazmasters (14000)
-df_hazmasters = spark.sql(f"""
-SELECT sf.datasource_num_id,
-  (SELECT bd.sbu FROM {source_schema}.branch_dim bd WHERE sf.branch_id = bd.branch_id LIMIT 1) as sbu,
-  uof.ent_type as ent_type,
-  (SELECT doc.rollup_category FROM {source_schema}.udm_digital_channel_code_dim doc WHERE doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id LIMIT 1) as rollup_category,
-  sf.date_invoice, count(distinct sf.order_number) as total_no_of_sales, sum(sf.sales_amount) as sales_amount, sf.currency,
-  (SELECT dt.datasource_description FROM {source_schema}.datasource_tbl dt WHERE dt.datasource_num_id = sf.datasource_num_id LIMIT 1) as data_source_name,
-  concat(cus.customer_no, '_', cus.customer_name) as cust_name, sf.invoice_no, sf.order_number,
-  CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END as currency_conversion,
-  (cast(sum(sf.sales_amount) as DECIMAL(38,2)) * CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END) as sales_amount_USD,
-  current_date() as CREATE_DATE
-FROM {source_schema}.udm_sales_fact sf
-LEFT OUTER JOIN (SELECT distinct ent_type, sales_order_no, branch_id FROM {source_schema}.udm_order_fact WHERE datasource_num_id = '14000') uof ON (uof.sales_order_no = sf.order_number AND sf.branch_id = uof.branch_id)
-LEFT OUTER JOIN {source_schema}.udm_customer_dim cus ON sf.customer_dim_key = cus.customer_dim_key
-WHERE sf.datasource_num_id = 14000
-  AND sf.date_invoice > (SELECT max_date_loaded FROM v_view_load WHERE datasource_num_id = 14000) 
-  AND sf.date_invoice < trunc(current_date(), 'MM')
-  AND sf.accounting_include_flag = 'Y'
-  AND coalesce(sf.sales_transfer_flag, 'N') <> 'Y'
-  AND coalesce(sf.kit_component_flag, 'N') <> 'C'
-GROUP BY sf.datasource_num_id, uof.ent_type, sbu, rollup_category, sf.date_invoice, sf.currency, 
-         cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, data_source_name, currency_conversion
-HAVING sum(sf.sales_amount) <> 0
-""")
-
-# 7. WIS (10000)
-df_wis = spark.sql(f"""
-SELECT sf.datasource_num_id,
-  (SELECT bd.sbu FROM {source_schema}.branch_dim bd WHERE sf.branch_id = bd.branch_id LIMIT 1) as sbu,
-  coalesce(uof.ent_type, 'e-Crib') as ent_type,
-  coalesce((SELECT doc.rollup_category FROM {source_schema}.udm_digital_channel_code_dim doc WHERE doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id LIMIT 1), 'Materials Management') as rollup_category,
-  sf.date_invoice, count(distinct sf.order_number) as total_no_of_sales, sum(sf.sales_amount) as sales_amount, sf.currency,
-  (SELECT dt.datasource_description FROM {source_schema}.datasource_tbl dt WHERE dt.datasource_num_id = sf.datasource_num_id LIMIT 1) as data_source_name,
-  concat(cus.customer_no, '_', cus.customer_name) as cust_name, sf.invoice_no, sf.order_number,
-  CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END as currency_conversion,
-  (cast(sum(sf.sales_amount) as DECIMAL(38,2)) * CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END) as sales_amount_USD,
-  current_date() as CREATE_DATE
-FROM {source_schema}.udm_sales_fact sf
-LEFT OUTER JOIN (SELECT distinct ent_type, sales_order_no, branch_id FROM {source_schema}.udm_order_fact WHERE datasource_num_id = '10000') uof ON (sf.order_number = uof.sales_order_no AND sf.branch_id = uof.branch_id)
-LEFT OUTER JOIN {source_schema}.udm_customer_dim cus ON sf.customer_dim_key = cus.customer_dim_key
-WHERE sf.datasource_num_id = 10000 
-  AND sf.date_invoice > (SELECT max_date_loaded FROM v_view_load WHERE datasource_num_id = 10000) 
-  AND sf.date_invoice < trunc(current_date(), 'MM')
-GROUP BY sf.datasource_num_id, uof.ent_type, sbu, rollup_category, sf.date_invoice, sf.currency, 
-         cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, data_source_name, currency_conversion
-HAVING sum(sf.sales_amount) <> 0
-""")
-
-# 8. TVC (4000)
-df_tvc = spark.sql(f"""
-SELECT sf.datasource_num_id,
-  (SELECT bd.sbu FROM {source_schema}.branch_dim bd WHERE sf.branch_id = bd.branch_id LIMIT 1) as sbu,
-  uof.ent_type as ent_type,
-  (SELECT doc.rollup_category FROM {source_schema}.udm_digital_channel_code_dim doc WHERE doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id LIMIT 1) as rollup_category,
-  sf.date_invoice, count(distinct sf.order_number) as total_no_of_sales, sum(sf.sales_amount) as sales_amount, sf.currency,
-  (SELECT dt.datasource_description FROM {source_schema}.datasource_tbl dt WHERE dt.datasource_num_id = sf.datasource_num_id LIMIT 1) as data_source_name,
-  concat(cus.customer_no, '_', cus.customer_name) as cust_name, sf.invoice_no, sf.order_number,
-  CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END as currency_conversion,
-  (cast(sum(sf.sales_amount) as DECIMAL(38,2)) * CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END) as sales_amount_USD,
-  current_date() as CREATE_DATE
-FROM {source_schema}.udm_sales_fact sf
-LEFT OUTER JOIN (SELECT distinct ent_type, sales_order_no, flex_1 FROM {source_schema}.udm_order_fact WHERE datasource_num_id = '4000') uof ON (sf.order_number = uof.sales_order_no AND sf.flex_1 = uof.flex_1)
-LEFT OUTER JOIN (
-    SELECT customer_name, customer_no, customer_dim_key, 
-           CASE WHEN (UPPER(national_acct_no) IN ('ICO','ANIX','INTE','WESC','WDB','LIB') OR UPPER(customer_name) LIKE '%WESCO%' OR UPPER(customer_name) LIKE '%ANIXTER%') THEN 'Y' ELSE 'N' END AS INTERBRANCH_FLAG 
-    FROM {source_schema}.udm_customer_dim
-) cus ON sf.customer_dim_key = cus.customer_dim_key
-WHERE sf.datasource_num_id = 4000
-  AND sf.date_invoice > (SELECT max_date_loaded FROM v_view_load WHERE datasource_num_id = 4000) 
-  AND sf.date_invoice < trunc(current_date(), 'MM')
-  AND sf.accounting_include_flag = 'Y'
-  AND cus.INTERBRANCH_FLAG <> 'Y' 
-  AND coalesce(sf.sales_transfer_flag, 'N') <> 'Y'
-  AND coalesce(sf.kit_component_flag, 'N') <> 'C'
-  AND left(cus.customer_no, 1) <> 'X'
-  AND sf.sim_description <> 'Datacom Redaction'
-  AND coalesce(sf.inventory_org_code, '') <> 'SCS'
-  AND (sf.sales_amount <> 0 OR sf.cost_amount <> 0 OR sf.quantity <> 0 OR sf.market_cost <> 0)
-  AND sf.transaction_type <> 'X99'
-GROUP BY sf.datasource_num_id, uof.ent_type, sbu, rollup_category, sf.date_invoice, sf.currency, 
-         cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, data_source_name, currency_conversion
-HAVING sum(sf.sales_amount) <> 0
-""")
-
-# 9. HC (6000), AED (7000), Needham (8000)
-# NOTE: The Teradata logic for 6000, 7000, and 8000 is literally identical except for the ID.
-# We optimize this for Spark by grouping them into an IN clause.
-df_hc_aed_needham = spark.sql(f"""
-SELECT sf.datasource_num_id,
-  (SELECT bd.sbu FROM {source_schema}.branch_dim bd WHERE sf.branch_id = bd.branch_id LIMIT 1) as sbu,
-  uof.ent_type as ent_type,
-  (SELECT doc.rollup_category FROM {source_schema}.udm_digital_channel_code_dim doc WHERE doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id LIMIT 1) as rollup_category,
-  sf.date_invoice, count(distinct sf.order_number) as total_no_of_sales, sum(sf.sales_amount) as sales_amount, sf.currency,
-  (SELECT dt.datasource_description FROM {source_schema}.datasource_tbl dt WHERE dt.datasource_num_id = sf.datasource_num_id LIMIT 1) as data_source_name,
-  concat(cus.customer_no, '_', cus.customer_name) as cust_name, sf.invoice_no, sf.order_number,
-  CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END as currency_conversion,
-  (cast(sum(sf.sales_amount) as DECIMAL(38,2)) * CASE WHEN sf.currency = 'USD' THEN 1 ELSE (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1) END) as sales_amount_USD,
-  current_date() as CREATE_DATE
-FROM {source_schema}.udm_sales_fact sf
-LEFT OUTER JOIN (SELECT distinct ent_type, sales_order_no, branch_id, datasource_num_id, invoice_no FROM {source_schema}.udm_order_fact) uof 
-  ON (uof.sales_order_no = sf.wesnet_order_no AND sf.branch_id = uof.branch_id AND uof.datasource_num_id = sf.datasource_num_id 
-      AND uof.ent_type IN ('RDC','EDI','MBL','IX') AND concat(uof.sales_order_no, '.', lpad(uof.invoice_no, 3, '0')) = sf.invoice_no)
-LEFT OUTER JOIN {source_schema}.udm_customer_dim cus ON sf.customer_dim_key = cus.customer_dim_key
-WHERE sf.datasource_num_id IN (6000, 7000, 8000)
-  AND sf.date_invoice > (SELECT coalesce(max(max_date_loaded), '1900-01-01') FROM v_view_load WHERE datasource_num_id = sf.datasource_num_id) 
-  AND sf.date_invoice < trunc(current_date(), 'MM')
-GROUP BY sf.datasource_num_id, uof.ent_type, sbu, rollup_category, sf.date_invoice, sf.currency, 
-         cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, data_source_name, currency_conversion
-HAVING sum(sf.sales_amount) <> 0
-""")
-
-# 10. Anixter Eclipse (12001)
-df_anixter_eclipse = spark.sql(f"""
-SELECT sf.datasource_num_id,
-  (SELECT bd.sbu FROM {source_schema}.branch_dim bd WHERE sf.branch_id = bd.branch_id LIMIT 1) as sbu,
-  uof.ent_type1,
-  (SELECT doc.rollup_category FROM {source_schema}.udm_digital_channel_code_dim doc WHERE doc.ent_type = uof.ent_type1 AND doc.datasource_num_id = sf.datasource_num_id LIMIT 1) as rollup_category,
-  sf.date_invoice, count(distinct sf.order_number) as total_no_of_sales, sum(sf.sales_amount) as sales_amount, sf.currency,
-  (SELECT dt.datasource_name FROM {source_schema}.datasource_tbl dt WHERE dt.datasource_num_id = sf.datasource_num_id LIMIT 1) as data_source_name,
-  concat(cus.customer_no, '_', cus.customer_name) as cust_name, sf.invoice_no, sf.order_number,
-  coalesce(
-    CASE WHEN sf.currency = 'USD' THEN 1 ELSE coalesce(
-      (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1), 
-      (SELECT curr_conv_actual_f FROM {source_schema}.anixter_monthly_conversion_rate_tbl curr_conv WHERE curr_conv.from_curr_c = sf.currency AND curr_conv.rate_type = 'MTEND' AND year(sf.date_invoice) = curr_conv.fiscal_YY_d AND month(sf.date_invoice) = curr_conv.fiscal_MM_D LIMIT 1)) 
-    END, sf.conversion_rate
-  ) as currency_conversion,
-  (cast(sum(sf.sales_amount) as DECIMAL(38,2)) * 
-   coalesce(CASE WHEN sf.currency = 'USD' THEN 1 ELSE coalesce((SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1), (SELECT curr_conv_actual_f FROM {source_schema}.anixter_monthly_conversion_rate_tbl curr_conv WHERE curr_conv.from_curr_c = sf.currency AND curr_conv.rate_type = 'MTEND' AND year(sf.date_invoice) = curr_conv.fiscal_YY_d AND month(sf.date_invoice) = curr_conv.fiscal_MM_D LIMIT 1)) END, sf.conversion_rate)
-  ) as sales_amount_USD,
-  current_date() as CREATE_DATE
-FROM {source_schema}.udm_sales_fact sf
-LEFT OUTER JOIN (
-    SELECT distinct ent_type, 
-           CASE WHEN trim(uo.ent_type) = 'EDI' THEN 'EDI Sales'
-                WHEN uo.ent_type = 'WOE' THEN 'Web Order Entry (WOE)'
-                WHEN uo.ent_type = 'MBAS' THEN 'Virtual Warehouse'
-                WHEN uo.ent_type = 'CRM' THEN 'Vending Machines'
-                WHEN uo.ent_type = 'Manual' AND customer_po_no = 'CRIBMASTER' THEN 'Vending Machines'
-                ELSE uo.ent_type END as ent_type1, 
-           sales_order_no, branch_id, datasource_num_id, invoice_no, date_invoice
-    FROM {source_schema}.udm_order_fact uo
-) uof ON (uof.sales_order_no = sf.order_number AND trim(concat(uof.sales_order_no, '.', uof.invoice_no)) = sf.invoice_no)
-LEFT OUTER JOIN {source_schema}.udm_customer_dim cus ON sf.customer_dim_key = cus.customer_dim_key
-WHERE sf.datasource_num_id = '12001'
-  AND sf.date_invoice > (SELECT max(max_date_loaded) FROM v_view_load WHERE datasource_num_id = 12001) 
-  AND sf.accounting_include_flag = 'Y'
-  AND coalesce(sf.sales_transfer_flag, 'N') <> 'Y'
-  AND coalesce(sf.kit_component_flag, 'N') <> 'C'
-  AND cus.intercompany_customer <> 'Y'
-  AND sf.date_invoice < trunc(current_date(), 'MM')
-GROUP BY sf.datasource_num_id, uof.ent_type1, sbu, rollup_category, sf.date_invoice, sf.currency, 
-         cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, data_source_name, currency_conversion
-HAVING sum(sf.sales_amount) <> 0
-""")
-
-# 11. Anixter SXE USA, SXE CAN, Mainframe (12002, 12003, 12004)
-df_anixter_sxe = spark.sql(f"""
-SELECT sf.datasource_num_id,
-  (SELECT bd.sbu FROM {source_schema}.branch_dim bd WHERE sf.branch_id = bd.branch_id LIMIT 1) as sbu,
-  uof.ent_type as ent_type,
-  (SELECT doc.rollup_category FROM {source_schema}.udm_digital_channel_code_dim doc WHERE doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id LIMIT 1) as rollup_category,
-  sf.date_invoice, count(distinct sf.order_number) as total_no_of_sales, sum(sf.sales_amount) as sales_amount, sf.currency,
-  (SELECT dt.datasource_description FROM {source_schema}.datasource_tbl dt WHERE dt.datasource_num_id = sf.datasource_num_id LIMIT 1) as data_source_name,
-  concat(cus.customer_no, '_', cus.customer_name) as cust_name, sf.invoice_no, sf.order_number,
-  CASE WHEN sf.currency = 'USD' THEN 1 ELSE coalesce((SELECT CURR_CONV_ACTUAL_F FROM {source_schema}.anixter_monthly_conversion_rate_tbl curr_conv WHERE curr_conv.FROM_CURR_C = sf.currency AND curr_conv.rate_type = 'MTEND' AND year(sf.date_invoice) = curr_conv.FISCAL_YY_D AND month(sf.date_invoice) = curr_conv.FISCAL_MM_D LIMIT 1), sf.budget_conversion_rate) END as currency_conversion,
-  (cast(sum(sf.sales_amount) as DECIMAL(38,2)) * CASE WHEN sf.currency = 'USD' THEN 1 ELSE coalesce((SELECT CURR_CONV_ACTUAL_F FROM {source_schema}.anixter_monthly_conversion_rate_tbl curr_conv WHERE curr_conv.FROM_CURR_C = sf.currency AND curr_conv.rate_type = 'MTEND' AND year(sf.date_invoice) = curr_conv.FISCAL_YY_D AND month(sf.date_invoice) = curr_conv.FISCAL_MM_D LIMIT 1), sf.budget_conversion_rate) END) as sales_amount_USD,
-  current_date() as CREATE_DATE
-FROM {source_schema}.udm_sales_fact sf
-LEFT OUTER JOIN (SELECT distinct ent_type, sales_order_no, branch_id, datasource_num_id, invoice_no, date_invoice FROM {source_schema}.udm_order_fact) uof 
-  ON (sf.branch_id = uof.branch_id AND uof.datasource_num_id = sf.datasource_num_id AND uof.date_invoice = sf.date_invoice 
-      AND uof.invoice_no = CASE WHEN instr(sf.invoice_no, '-') > 0 THEN substring(sf.invoice_no, 1, instr(sf.invoice_no, '-') - 1) ELSE sf.invoice_no END 
-      AND uof.sales_order_no = sf.order_number)
-LEFT OUTER JOIN {source_schema}.udm_customer_dim cus ON sf.customer_dim_key = cus.customer_dim_key
-WHERE sf.datasource_num_id IN (12002, 12003, 12004)
-  AND sf.date_invoice > (SELECT max(max_date_loaded) FROM v_view_load WHERE datasource_num_id IN (12002, 12003, 12004)) 
-  AND trunc(sf.date_invoice, 'MM') <> trunc(current_date(), 'MM')
-  AND coalesce(cus.intercompany_customer, 'N') <> 'Y'
-  AND sf.date_invoice < trunc(current_date(), 'MM')
-GROUP BY sf.datasource_num_id, uof.ent_type, sbu, rollup_category, sf.date_invoice, sf.currency, 
-         cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, data_source_name, currency_conversion
-HAVING sum(sf.sales_amount) <> 0
-""")
-
-# 12. Anixter Rubicon (12005)
-df_anixter_rubicon = spark.sql(f"""
-SELECT sf.datasource_num_id,
-  (SELECT bd.sbu FROM {source_schema}.branch_dim bd WHERE sf.branch_id = bd.branch_id LIMIT 1) as sbu,
-  CASE WHEN uof.ent_type = 'A' THEN 'EDI Sales' ELSE uof.ent_type END as ent_type,
-  CASE WHEN uof.ent_type = 'A' THEN 'Integrations' ELSE (SELECT doc.rollup_category FROM {source_schema}.udm_digital_channel_code_dim doc WHERE doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id LIMIT 1) END as rollup_category,
-  sf.date_invoice, count(distinct sf.order_number) as total_no_of_sales, sum(sf.sales_amount) as sales_amount, sf.currency,
-  (SELECT dt.datasource_name FROM {source_schema}.datasource_tbl dt WHERE dt.datasource_num_id = sf.datasource_num_id LIMIT 1) as data_source_name,
-  concat(cus.customer_no, '_', cus.customer_name) as cust_name, sf.invoice_no, sf.order_number,
-  coalesce(
-    CASE WHEN sf.currency = 'USD' THEN 1 ELSE coalesce(
-      (SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1), 
-      (SELECT curr_conv_actual_f FROM {source_schema}.anixter_monthly_conversion_rate_tbl curr_conv WHERE curr_conv.from_curr_c = sf.currency AND curr_conv.rate_type = 'MTEND' AND year(sf.date_invoice) = curr_conv.fiscal_YY_d AND month(sf.date_invoice) = curr_conv.fiscal_MM_D LIMIT 1)) 
-    END, sf.conversion_rate
-  ) as currency_conversion,
-  (cast(sum(sf.sales_amount) as DECIMAL(38,2)) * coalesce(CASE WHEN sf.currency = 'USD' THEN 1 ELSE coalesce((SELECT conversion_rate FROM {source_schema}.ora_conv_rates_mthly curr_conv WHERE curr_conv.from_currency = sf.currency AND curr_conv.to_currency = 'USD' AND year(sf.date_invoice) = curr_conv.cnv_year AND month(sf.date_invoice) = curr_conv.cnv_month LIMIT 1), (SELECT curr_conv_actual_f FROM {source_schema}.anixter_monthly_conversion_rate_tbl curr_conv WHERE curr_conv.from_curr_c = sf.currency AND curr_conv.rate_type = 'MTEND' AND year(sf.date_invoice) = curr_conv.fiscal_YY_d AND month(sf.date_invoice) = curr_conv.fiscal_MM_D LIMIT 1)) END, sf.conversion_rate)) as sales_amount_USD,
-  current_date() as CREATE_DATE
-FROM {source_schema}.udm_sales_fact sf
-LEFT OUTER JOIN (SELECT distinct ent_type, sales_order_no, branch_id, datasource_num_id, invoice_no, date_invoice FROM {source_schema}.udm_order_fact) uof 
-  ON (sf.branch_id = uof.branch_id AND uof.datasource_num_id = sf.datasource_num_id AND uof.sales_order_no = cast(sf.order_number as bigint))
-LEFT OUTER JOIN {source_schema}.udm_customer_dim cus ON sf.customer_dim_key = cus.customer_dim_key
-WHERE sf.datasource_num_id = '12005'
-  AND sf.date_invoice > (SELECT max_date_loaded FROM v_view_load WHERE datasource_num_id = 12005) 
-  AND sf.accounting_include_flag = 'Y'
-  AND coalesce(sf.sales_transfer_flag, 'N') <> 'Y'
-  AND coalesce(sf.kit_component_flag, 'N') <> 'C'
-  AND sf.date_invoice < trunc(current_date(), 'MM')
-GROUP BY sf.datasource_num_id, uof.ent_type, sbu, rollup_category, sf.date_invoice, sf.currency, 
-         cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, data_source_name, currency_conversion
-HAVING sum(sf.sales_amount) <> 0
+spark.sql(f"""
+CREATE OR REPLACE TEMPORARY VIEW dim_customer AS
+SELECT * FROM (
+SELECT *,
+row_number() OVER (
+PARTITION BY customer_dim_key
+ORDER BY updated_ts DESC
+) AS row_num
+FROM (
+SELECT
+customer_dim_key, customer_no, customer_name, intercompany_customer,
+national_acct_no, dl_load_date, updated_ts
+FROM brz_teradata.udm_customer_dim
+where dl_load_date > '{min_cdc_value}'
+)
+)
+WHERE row_num = 1
 """)
 
 # COMMAND ----------
-# MAGIC %md
-# MAGIC ## Step 4: Union & Write (The `main_df`)
+
+spark.sql(f"""
+CREATE OR REPLACE TEMPORARY VIEW dim_branch AS
+SELECT * FROM (
+SELECT *,
+row_number() OVER (
+PARTITION BY branch_id
+ORDER BY updated_ts DESC
+) AS row_num
+FROM (
+SELECT branch_id, sbu, updated_ts FROM brz_teradata.branch_dim
+where dl_load_date > '{min_cdc_value}'
+)
+)
+WHERE row_num = 1
+""")
 
 # COMMAND ----------
 
-# Consolidate all independent dataframe views into a single master dataframe
-main_df = (df_wesnet
-           .unionByName(df_liberty)
-           .unionByName(df_erp)
-           .unionByName(df_conney)
-           .unionByName(df_eecol)
-           .unionByName(df_hazmasters)
-           .unionByName(df_wis)
-           .unionByName(df_tvc)
-           .unionByName(df_hc_aed_needham)
-           .unionByName(df_anixter_eclipse)
-           .unionByName(df_anixter_sxe)
-           .unionByName(df_anixter_rubicon))
+spark.sql(f"""
+CREATE OR REPLACE TEMPORARY VIEW dim_digital_channel AS
+SELECT distinct ent_type, datasource_num_id, rollup_category
+FROM brz_teradata.udm_digital_channel_code_dim where dl_load_date > '{min_cdc_value}'
+""")
 
-# Write data incrementally into the final target table (mimics the Teradata 'INSERT INTO')
-(main_df.write
-        .mode("append")
-        .option("mergeSchema", "true")
-        .saveAsTable(f"{target_schema}.digital_dashboard_control"))
+spark.sql(f"""
+CREATE OR REPLACE TEMPORARY VIEW ref_conversion_rates AS
+SELECT from_currency, to_currency, cnv_year, cnv_month, conversion_rate
+FROM brz_teradata.ora_conv_rates_mthly where dl_load_date > '{min_cdc_value}'
+""")
 
-print("Data load successfully completed.")
-
-# COMMAND ----------
-# MAGIC %md
-# MAGIC ## Step 5: Table Optimization (replaces 'COLLECT STATS')
+spark.sql(f"""
+CREATE OR REPLACE TEMPORARY VIEW ref_datasource AS
+SELECT datasource_num_id, datasource_description, datasource_name
+FROM brz_teradata.datasource_tbl where dl_load_date > '{min_cdc_value}'
+""")
 
 # COMMAND ----------
 
-# Run OPTIMIZE on the table to compact small files and manage Delta stats (Requires Databricks compute)
-spark.sql(f"OPTIMIZE {target_schema}.digital_dashboard_control")
+main_df = spark.sql(f"""
+        WITH base_incremental_sales AS (
+        SELECT * FROM sf_sales_fact
+        WHERE date_invoice < trunc(current_date(), 'MM')
+        )
+        SELECT * FROM (
+        -- 1. WESNET (3000)
+        SELECT
+        sf.datasource_num_id, bd.sbu, uof.flex_1 as ent_type, doc.rollup_category, sf.date_invoice,
+        count(*) as total_no_of_sales, sum(sf.sales_amount) as sales_amount, sf.currency,
+        dt.datasource_description as data_source_name, concat(cus.customer_no, '_', cus.customer_name) as cust_name,
+        sf.invoice_no, sf.wesnet_order_no as order_number,
+        coalesce(cr.conversion_rate, 1) as currency_conversion,
+        (cast(sum(sf.sales_amount) as DECIMAL(38,2)) * coalesce(cr.conversion_rate, 1)) as sales_amount_USD,
+        current_date() as CREATE_DATE
+        FROM base_incremental_sales sf
+        LEFT JOIN of_order_fact uof ON (uof.sales_order_no = sf.wesnet_order_no AND uof.datasource_num_id = sf.datasource_num_id AND uof.branch_id = sf.branch_id AND uof.order_integration_id = sf.order_integration_id)
+        LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id
+        LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.flex_1 AND doc.datasource_num_id = uof.datasource_num_id)
+        LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id
+        LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key
+        LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
+        WHERE sf.datasource_num_id = 3000 AND sf.accounting_include_flag = 'Y' AND coalesce(sf.sales_transfer_flag, 'N') <> 'Y' AND coalesce(sf.kit_component_flag, 'N') <> 'C' AND left(cus.customer_no, 1) <> 'X' AND sf.sim_description <> 'Datacom Redaction' AND coalesce(sf.inventory_org_code, '') <> 'SCS' AND (sf.sales_amount <> 0 OR sf.cost_amount <> 0 OR sf.quantity <> 0 OR sf.market_cost <> 0) AND sf.transaction_type <> 'X99'
+        GROUP BY sf.datasource_num_id, uof.flex_1, bd.sbu, doc.rollup_category, sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.wesnet_order_no, dt.datasource_description, cr.conversion_rate
+        HAVING sum(sf.sales_amount) <> 0
+        UNION ALL
+        -- 2. LIBERTY (5000)
+        SELECT
+        sf.datasource_num_id, bd.sbu, uof.ent_type, doc.rollup_category, sf.date_invoice,
+        count(distinct sf.order_number) as total_no_of_sales, sum(sf.sales_amount) as sales_amount, sf.currency,
+        dt.datasource_description as data_source_name, concat(cus.customer_no, '_', cus.customer_name) as cust_name,
+        sf.invoice_no, sf.order_number,
+        coalesce(cr.conversion_rate, 1) as currency_conversion,
+        (cast(sum(sf.sales_amount) as DECIMAL(38,2)) * coalesce(cr.conversion_rate, 1)) as sales_amount_USD,
+        current_date() as CREATE_DATE
+        FROM base_incremental_sales sf
+        LEFT JOIN of_order_fact uof ON (uof.sales_order_no = sf.order_number AND sf.branch_id = uof.branch_id AND uof.datasource_num_id = 5000)
+        LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id
+        LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id)
+        LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id
+        LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key
+        LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
+        WHERE sf.datasource_num_id = 5000
+        GROUP BY sf.datasource_num_id, uof.ent_type, bd.sbu, doc.rollup_category, sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, dt.datasource_description, cr.conversion_rate
+        HAVING sum(sf.sales_amount) <> 0
+        UNION ALL
+        -- 3. HC (6000), AED (7000), Needham (8000), ERP (9000), WIS (10000), EECOL (11000), Conney (13000), Hazmasters (14000)
+        -- Grouping similarly structured logic for brevity in Spark SQL
+        SELECT
+        sf.datasource_num_id, bd.sbu, uof.ent_type, doc.rollup_category, sf.date_invoice,
+        count(distinct sf.order_number) as total_no_of_sales, sum(sf.sales_amount) as sales_amount, sf.currency,
+        dt.datasource_description as data_source_name, concat(cus.customer_no, '_', cus.customer_name) as cust_name,
+        sf.invoice_no, sf.order_number,
+        coalesce(cr.conversion_rate, 1) as currency_conversion,
+        (cast(sum(sf.sales_amount) as DECIMAL(38,2)) * coalesce(cr.conversion_rate, 1)) as sales_amount_USD,
+        current_date() as CREATE_DATE
+        FROM base_incremental_sales sf
+        LEFT JOIN of_order_fact uof ON (uof.sales_order_no = sf.order_number AND sf.branch_id = uof.branch_id)
+        LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id
+        LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id)
+        LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id
+        LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key
+        LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
+        WHERE sf.datasource_num_id IN (6000, 7000, 8000, 9000, 10000, 11000, 13000, 14000)
+        AND coalesce(sf.sales_transfer_flag, 'N') <> 'Y' AND coalesce(sf.kit_component_flag, 'N') <> 'C'
+        GROUP BY sf.datasource_num_id, uof.ent_type, bd.sbu, doc.rollup_category, sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, dt.datasource_description, cr.conversion_rate
+        HAVING sum(sf.sales_amount) <> 0
+        )
+""")
 
+# COMMAND ----------
+
+if Data_quality == 'Y':
+    dq = create_dq_framework(spark)
+    checks = [
+    # Ensuring the composite primary keys are not null
+    dq.null_check(df = main_df, columns = ["datasource_num_id", "invoice_no", "order_number"]),
+    dq.duplicate_check(df = main_df, columns = ["datasource_num_id", "invoice_no", "order_number", "date_invoice"])
+    ]
+    clean_df, dq_results = dq.execute_checks(df = main_df, checks = checks, table_name = "gld_eudm.digital_dashboard_control", catalog_name = catalog_name, fail_on_error = eval(fail_on_error))
+
+    if use_clean_data == 'Y':
+        clean_df.createOrReplaceTempView("final_df")
+        print("Processing cleansed dataframe")
+    else:
+        main_df.createOrReplaceTempView("final_df")
+        print("Processing main dataframe")
+else:
+    print("Processing main dataframe")
+    main_df.createOrReplaceTempView("final_df")
+    dq_results = None
+
+# COMMAND ----------
+
+# - The below code performs a merge operation between selected source data with the target data
+# - CDC:- The incremental logic selects the data where the modifyts of source table is greater than the target execution date
+# - Deduplication handles selecting the latest records
+# - Merges on composite key: datasource_num_id, invoice_no, order_number
+
+try:
+    spark.sql(f"""
+        MERGE INTO slv_salesorder.digital_dashboard_control AS t
+        USING (
+            SELECT * 
+            FROM final_df
+        ) AS s
+        ON t.datasource_num_id = s.datasource_num_id
+        AND t.invoice_no = s.invoice_no
+        AND t.order_number = s.order_number
+        AND t.date_invoice = s.date_invoice
+
+        WHEN MATCHED THEN
+        UPDATE SET
+            t.sbu = s.sbu,
+            t.ent_type = s.ent_type,
+            t.rollup_category = s.rollup_category,
+            t.total_no_of_sales = s.total_no_of_sales,
+            t.sales_amount = s.sales_amount,
+            t.currency = s.currency,
+            t.data_source_name = s.data_source_name,
+            t.cust_name = s.cust_name,
+            t.currency_conversion = s.currency_conversion,
+            t.sales_amount_USD = s.sales_amount_USD,
+            t.CREATE_DATE = s.CREATE_DATE,
+            t.dl_updated_ts = '{max_cdc_value}'
+
+        WHEN NOT MATCHED THEN
+        INSERT (
+            datasource_num_id,
+            sbu,
+            ent_type,
+            rollup_category,
+            date_invoice,
+            total_no_of_sales,
+            sales_amount,
+            currency,
+            data_source_name,
+            cust_name,
+            invoice_no,
+            order_number,
+            currency_conversion,
+            sales_amount_USD,
+            CREATE_DATE,
+            dl_load_ts,
+            dl_updated_ts
+        )
+        VALUES (
+            s.datasource_num_id,
+            s.sbu,
+            s.ent_type,
+            s.rollup_category,
+            s.date_invoice,
+            s.total_no_of_sales,
+            s.sales_amount,
+            s.currency,
+            s.data_source_name,
+            s.cust_name,
+            s.invoice_no,
+            s.order_number,
+            s.currency_conversion,
+            s.sales_amount_USD,
+            s.CREATE_DATE,
+            '{max_cdc_value}',
+            '{max_cdc_value}'
+        )
+    """)
+
+    results = {
+        "Status": "Success",
+        "dq_summary": dq_results,
+        "cdc_value": str(max_cdc_value)
+    }
+
+    dbutils.notebook.exit(json.dumps(results))
+
+except Exception as e:
+    results = {
+        "Status": "Failed",
+        "error_message": str(e),
+        "cdc_value": str(min_cdc_value)
+    }
+
+    raise Exception(json.dumps(results))
