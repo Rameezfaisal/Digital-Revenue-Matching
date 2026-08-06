@@ -1,1 +1,23 @@
-[UNRESOLVED_COLUMN.WITH_SUGGESTION] A column, variable, or function parameter with name `sf`.`flex_1` cannot be resolved. Did you mean one of the following? [`uof`.`flex_1`, `sf`.`row_num`, `sf`.`currency`, `sf`.`branch_id`, `sf`.`quantity`]. SQLSTATE: 42703
+# COMMAND ----------
+
+spark.sql(f"""
+CREATE OR REPLACE TEMPORARY VIEW sf_sales_fact AS
+SELECT * FROM (
+    SELECT *,
+    row_number() OVER (
+        PARTITION BY datasource_num_id, invoice_no, order_number, branch_id
+        ORDER BY updated_ts DESC
+    ) AS row_num
+    FROM (
+        SELECT
+            datasource_num_id, branch_id, date_invoice, sales_amount, currency, customer_dim_key,
+            invoice_no, wesnet_order_no, order_number, order_integration_id, accounting_include_flag,
+            sales_transfer_flag, kit_component_flag, sim_description, inventory_org_code,
+            cost_amount, quantity, market_cost, transaction_type, invoice_line_no, conversion_rate,
+            budget_conversion_rate, flex_1, dl_load_date, updated_ts
+        FROM brz_teradata.udm_sales_fact 
+        WHERE dl_load_date > '{min_cdc_value}'
+    )
+)
+WHERE row_num = 1
+""")
