@@ -18,3 +18,15 @@ FROM slv_salesorder.digital_dashboard_control
 WHERE datasource_num_id IN (3000, 10000, 11000)
 GROUP BY datasource_num_id
 ORDER BY datasource_num_id;
+
+
+
+
+SELECT 
+    datasource_num_id, 
+    COUNT(*) as total_rows,
+    SUM(CASE WHEN invoice_no IS NULL THEN 1 ELSE 0 END) as null_invoices,
+    SUM(CASE WHEN order_number IS NULL THEN 1 ELSE 0 END) as null_orders
+FROM brz_teradata.udm_sales_fact
+WHERE datasource_num_id IN (10000, 11000)
+GROUP BY datasource_num_id;
