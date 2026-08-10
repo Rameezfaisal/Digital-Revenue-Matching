@@ -1,8 +1,20 @@
-	distinct_orders	total_rows
-1	9,338,044	9,541,195
+SELECT 
+    EXTRACT(YEAR FROM date_invoice) AS invoice_year, 
+    COUNT(DISTINCT order_number) AS distinct_orders,
+    COUNT(*) AS total_rows 
+FROM dss_marts.digital_dashboard_control 
+WHERE datasource_num_id = 3000 
+GROUP BY EXTRACT(YEAR FROM date_invoice) 
+ORDER BY invoice_year;
 
 
-databricks output
 
-distinct_orders	total_rows
-17206099	17750104
+
+SELECT 
+    YEAR(date_invoice) AS invoice_year, 
+    COUNT(DISTINCT order_number) AS distinct_orders,
+    COUNT(*) AS total_rows 
+FROM slv_salesorder.digital_dashboard_control 
+WHERE datasource_num_id = 3000 
+GROUP BY YEAR(date_invoice) 
+ORDER BY invoice_year;
