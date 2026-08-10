@@ -1,6 +1,2 @@
-SELECT 
-    COUNT(*) as total_raw_rows,
-    SUM(CASE WHEN order_number IS NULL THEN 1 ELSE 0 END) as null_order_numbers,
-    SUM(CASE WHEN invoice_line_no IS NULL THEN 1 ELSE 0 END) as null_invoice_lines
-FROM brz_teradata.udm_sales_fact 
-WHERE datasource_num_id = 12004;
+total_raw_rows	null_order_numbers	null_invoice_lines
+104370524	0	823939
