@@ -8,7 +8,7 @@ SELECT * FROM (
             invoice_no, 
             order_number, 
             branch_id, 
-            COALESCE(CAST(invoice_line_no AS STRING), concat(CAST(sales_amount AS STRING), CAST(quantity AS STRING)))
+            COALESCE(CAST(invoice_line_no AS STRING), concat(CAST(sales_amount AS STRING), '|', CAST(quantity AS STRING)))
         ORDER BY updated_ts DESC
     ) AS row_num
     FROM (
