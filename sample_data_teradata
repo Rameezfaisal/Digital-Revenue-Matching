@@ -1,26 +1,9 @@
-spark.sql(f"""
-CREATE OR REPLACE TEMPORARY VIEW sf_sales_fact AS
-SELECT * FROM (
-    SELECT *,
-    row_number() OVER (
-        PARTITION BY 
-            datasource_num_id, 
-            invoice_no, 
-            order_number, 
-            branch_id, 
-            COALESCE(CAST(invoice_line_no AS STRING), concat(CAST(sales_amount AS STRING), '|', CAST(quantity AS STRING)))
-        ORDER BY updated_ts DESC
-    ) AS row_num
-    FROM (
-        SELECT
-            datasource_num_id, branch_id, date_invoice, sales_amount, currency, customer_dim_key,
-            invoice_no, wesnet_order_no, order_number, order_integration_id, accounting_include_flag,
-            sales_transfer_flag, kit_component_flag, sim_description, inventory_org_code,
-            cost_amount, quantity, market_cost, transaction_type, invoice_line_no, conversion_rate,
-            budget_conversion_rate, flex_1, dl_load_date, updated_ts
-        FROM brz_teradata.udm_sales_fact 
-        WHERE dl_load_date > '{min_cdc_value}'
-    )
-)
-WHERE row_num = 1
-""")
+SELECT 
+    datasource_num_id, 
+    COUNT(*) AS dbx_record_count 
+FROM slv_salesorder.digital_dashboard_control 
+GROUP BY datasource_num_id 
+ORDER BY datasource_num_id;
+
+
+
