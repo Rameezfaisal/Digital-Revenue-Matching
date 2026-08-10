@@ -1,17 +1,6 @@
-when i ran this query in databricks for eecol
-
-%sql
-SELECT datasource_num_id, 
-COUNT(*) AS record_count 
-FROM dev_eecol_engineering.brz_teradata.udm_sales_fact 
+SELECT 
+    datasource_num_id, 
+    COUNT(*) AS dbx_record_count 
+FROM slv_salesorder.digital_dashboard_control 
 GROUP BY datasource_num_id 
 ORDER BY datasource_num_id;
-
-
-this is the output
-
-datasource_num_id	record_count
-9000	4718686
-10000	8270443
-11000	53617213
-14000	2133852
