@@ -1,4 +1,19 @@
-​While investigating the count mismatches between Teradata and Databricks for the digital_dashboard_control table, I discovered one of the root causes. In Teradata, all data sources are queried from a single location. However, in Databricks, our data is split across two different catalogs (for example, EECOL and WIS are sitting in dev_eecol_engineering, while the rest are in our main catalog).
-​Because our current notebook only reads from the main catalog, we are completely dropping those sources.
-​To fix this and accurately mimic the Teradata output, I am planning to combine the data from both catalogs using a UNION ALL when we build our initial temporary views (sf_sales_fact, of_order_fact, etc.) in the Databricks notebook.
-​Does this approach sound good to you? Let me know and I will go ahead and implement the fix.
+SELECT 
+    COUNT(*) AS total_raw_rows,
+    COUNT(DISTINCT datasource_num_id, invoice_no, order_number, branch_id) AS deduped_without_line_no,
+    COUNT(DISTINCT datasource_num_id, invoice_no, invoice_line_no, order_number, branch_id) AS deduped_with_line_no
+FROM brz_teradata.udm_sales_fact
+WHERE datasource_num_id = 3000 
+AND YEAR(date_invoice) = 2022;
+
+
+
+
+spark.sql(f"""
+CREATE OR REPLACE TEMPORARY VIEW sf_sales_fact AS
+SELECT * FROM (
+    SELECT *,
+    row_number() OVER (
+        PARTITION BY datasource_num_id, invoice_no, invoice_line_no, order_number, branch_id
+        ORDER BY updated_ts DESC
+    ) AS row_num
