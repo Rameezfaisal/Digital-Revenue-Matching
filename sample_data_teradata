@@ -1,19 +1,6 @@
-SELECT 
-    COUNT(*) AS total_raw_rows,
-    COUNT(DISTINCT datasource_num_id, invoice_no, order_number, branch_id) AS deduped_without_line_no,
-    COUNT(DISTINCT datasource_num_id, invoice_no, invoice_line_no, order_number, branch_id) AS deduped_with_line_no
-FROM brz_teradata.udm_sales_fact
-WHERE datasource_num_id = 3000 
-AND YEAR(date_invoice) = 2022;
+total_raw_rows	deduped_without_line_no	deduped_with_line_no
+19451685	5499806	13763520
 
 
-
-
-spark.sql(f"""
-CREATE OR REPLACE TEMPORARY VIEW sf_sales_fact AS
-SELECT * FROM (
-    SELECT *,
-    row_number() OVER (
-        PARTITION BY datasource_num_id, invoice_no, invoice_line_no, order_number, branch_id
-        ORDER BY updated_ts DESC
-    ) AS row_num
+after updating the code 
+select count(*) from slv_salesorder.digital_dashboard_control  given count 61110727
