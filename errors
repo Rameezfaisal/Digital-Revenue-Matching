@@ -1,8 +1,10 @@
 SELECT 
     datasource_num_id, 
-    COUNT(*) AS record_count 
-FROM dss_marts.digital_dashboard_control 
-GROUP BY datasource_num_id 
+    MIN(date_invoice) as min_date_invoice, 
+    COUNT(*) as row_cnt
+FROM dss_marts.digital_dashboard_control
+WHERE datasource_num_id IN (3000, 10000, 11000)
+GROUP BY datasource_num_id
 ORDER BY datasource_num_id;
 
 
@@ -10,7 +12,9 @@ ORDER BY datasource_num_id;
 
 SELECT 
     datasource_num_id, 
-    COUNT(*) AS record_count 
-FROM slv_salesorder.digital_dashboard_control 
-GROUP BY datasource_num_id 
+    MIN(date_invoice) as min_date_invoice, 
+    COUNT(*) as row_cnt
+FROM slv_salesorder.digital_dashboard_control
+WHERE datasource_num_id IN (3000, 10000, 11000)
+GROUP BY datasource_num_id
 ORDER BY datasource_num_id;
