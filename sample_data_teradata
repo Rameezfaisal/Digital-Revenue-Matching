@@ -1,12 +1,8 @@
-SELECT 
-    COUNT(DISTINCT invoice_no || order_number) AS distinct_orders,
-    COUNT(*) AS total_rows
-FROM dss_marts.digital_dashboard_control
-WHERE datasource_num_id = 3000;
+	distinct_orders	total_rows
+1	9,338,044	9,541,195
 
 
-SELECT 
-    COUNT(DISTINCT invoice_no, order_number) AS distinct_orders,
-    COUNT(*) AS total_rows
-FROM slv_salesorder.digital_dashboard_control
-WHERE datasource_num_id = 3000;
+databricks output
+
+distinct_orders	total_rows
+17206099	17750104
