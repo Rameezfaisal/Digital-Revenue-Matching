@@ -1,6 +1,1 @@
-total_raw_rows	deduped_without_line_no	deduped_with_line_no
-19451685	5499806	13763520
-
-
-after updating the code 
-select count(*) from slv_salesorder.digital_dashboard_control  given count 61110727
+dbutils.widgets.text("cdc_value", "2022-01-01 00:00:00.000")
