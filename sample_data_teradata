@@ -1,21 +1,4 @@
-Teradata output
-
-	invoice_year	distinct_orders	total_rows
-1	2,022	841,811	3,147,982
-2	2,023	826,141	2,923,260
-3	2,024	805,704	2,610,268
-4	2,025	423,667	859,685
-
-
-databricks output
-
-invoice_year	distinct_orders	total_rows
-2018	853670	2663598
-2019	844532	2559791
-2020	808500	2335595
-2021	771491	2192858
-2022	733886	2031070
-2023	717286	1938730
-2024	694280	1752256
-2025	664560	1646921
-2026	345765	629285
+​While investigating the count mismatches between Teradata and Databricks for the digital_dashboard_control table, I discovered one of the root causes. In Teradata, all data sources are queried from a single location. However, in Databricks, our data is split across two different catalogs (for example, EECOL and WIS are sitting in dev_eecol_engineering, while the rest are in our main catalog).
+​Because our current notebook only reads from the main catalog, we are completely dropping those sources.
+​To fix this and accurately mimic the Teradata output, I am planning to combine the data from both catalogs using a UNION ALL when we build our initial temporary views (sf_sales_fact, of_order_fact, etc.) in the Databricks notebook.
+​Does this approach sound good to you? Let me know and I will go ahead and implement the fix.
