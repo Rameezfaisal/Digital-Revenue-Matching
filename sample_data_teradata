@@ -1,1 +1,6 @@
-dbutils.widgets.text("cdc_value", "2022-01-01 00:00:00.000")
+WITH base_incremental_sales AS (
+    SELECT * FROM sf_sales_fact
+    WHERE date_invoice < trunc(current_date(), 'MM')
+    AND YEAR(date_invoice) >= 2022 
+    AND YEAR(date_invoice) <= 2025 -- Matches Teradata's current upper bound
+)
