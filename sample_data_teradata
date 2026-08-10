@@ -1,6 +1,15 @@
-SELECT 
-    datasource_num_id, 
-    COUNT(*) AS dbx_record_count 
-FROM slv_salesorder.digital_dashboard_control 
-GROUP BY datasource_num_id 
-ORDER BY datasource_num_id;
+datasource_num_id	dbx_record_count
+3000	10172529
+4000	642270
+5000	174062
+6000	433235
+7000	299950
+8000	655929
+9000	639397
+12001	1746043
+12002	1884544
+12003	172152
+12004	12696569
+12005	533065
+13000	155828
+14000	456413
