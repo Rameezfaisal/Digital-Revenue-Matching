@@ -1,1 +1,175 @@
 
+# Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
+# MAGIC %md
+# MAGIC Name        : gld_eudm.digital_dashboard_control_summary <br/>
+# MAGIC Catalog     : WESCO, ATC <br/>
+# MAGIC Description : This notebook creates the digital_dashboard_control_summary table by aggregating data from the digital_dashboard_control table. <br/>
+# MAGIC Job ID:  <br/>
+# MAGIC Operation ID:  <br/>
+# MAGIC
+# MAGIC #### Change History - Must be updated for every change.<br/>
+# MAGIC |Version|Author|Date|Ticket|Short Description|
+# MAGIC |-------|------|----|------|-----------------|
+# MAGIC |1.0|Data Engineer|11-August-2026|TBD|Converted Teradata summary load to Databricks format|
+
+# COMMAND ----------
+
+dbutils.widgets.text("parameter_dictionary","""{"businessunit":"wesco","reload": "Y","Data_quality":"N","fail_on_error":"True","use_clean_data":"Y"}""")
+dbutils.widgets.text("cdc_column","dl_updated_ts")
+dbutils.widgets.text("cdc_value","1900-01-01 00:00:00.000")
+
+# COMMAND ----------
+
+# MAGIC %run /Workspace/DE-Transformation/utilities/job_parameters_and_environment_configuration
+
+# COMMAND ----------
+
+from datetime import datetime
+
+# set min and max timestamp for incremental data
+
+min_cdc_value = cdc_value
+max_cdc_value = datetime.now()
+print(f"{min_cdc_value} | {max_cdc_value}")
+
+# COMMAND ----------
+
+#Truncation for full reload
+if reload == 'Y':
+    print("Truncating data before load")
+    spark.sql(f"""TRUNCATE TABLE gld_eudm.digital_dashboard_control_summary""")
+    min_cdc_value = spark.sql(f"""select cast('1900-01-01T00:00:00.000+0000' as timestamp)""").collect()[0][0]
+else:
+    print("Incremental load")
+
+# COMMAND ----------
+
+# Check Run Condition (6th Work Day) - Exits early if condition is not met
+
+check_workday_df = spark.sql(f"""
+SELECT count(*) as valid_day
+FROM brz_teradata.calendar_work_day
+WHERE day_of_month = 6 AND calendar_date = current_date()
+""")
+
+if check_workday_df.collect()[0]["valid_day"] == 0:
+    dbutils.notebook.exit('{"Status": "Skipped", "Reason": "Today is not the 6th working day."}')
+
+print("Run condition met. Proceeding with load.")
+
+# COMMAND ----------
+
+main_df = spark.sql(f"""
+SELECT 
+    datasource_num_id,
+    rollup_category,
+    date_format(date_invoice, 'yyyy-MM') AS month_of_year,
+    SUM(total_no_of_sales) AS total_no_of_sales,
+    SUM(sales_amount) AS sales_amount,
+    SUM(sales_amount_usd) AS sales_amount_usd,
+    current_date() AS create_date
+FROM slv_salesorder.digital_dashboard_control 
+WHERE datasource_num_id IN (3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12001, 12002, 12003, 12004, 12005, 13000, 14000)
+  AND dl_updated_ts > '{min_cdc_value}'
+GROUP BY 
+    datasource_num_id,
+    rollup_category,
+    date_format(date_invoice, 'yyyy-MM')
+""")
+
+# COMMAND ----------
+
+if Data_quality == 'Y':
+    dq = create_dq_framework(spark)
+    checks = [
+    # Ensuring the primary keys are not null
+    dq.null_check(df = main_df, columns = ["datasource_num_id", "rollup_category", "month_of_year"]),
+    dq.duplicate_check(df = main_df, columns = ["datasource_num_id", "rollup_category", "month_of_year"])
+    ]
+    clean_df, dq_results = dq.execute_checks(df = main_df, checks = checks, table_name = "gld_eudm.digital_dashboard_control_summary", catalog_name = catalog_name, fail_on_error = eval(fail_on_error))
+
+    if use_clean_data == 'Y':
+        clean_df.createOrReplaceTempView("final_df")
+        print("Processing cleansed dataframe")
+    else:
+        main_df.createOrReplaceTempView("final_df")
+        print("Processing main dataframe")
+else:
+    print("Processing main dataframe")
+    main_df.createOrReplaceTempView("final_df")
+    dq_results = None
+
+# COMMAND ----------
+
+# - The below code performs a merge operation between selected source data with the target data
+# - Merges on composite key: datasource_num_id, rollup_category, month_of_year
+
+try:
+    spark.sql(f"""
+        MERGE INTO gld_eudm.digital_dashboard_control_summary AS t
+        USING (
+            SELECT * 
+            FROM final_df
+        ) AS s
+        ON t.datasource_num_id = s.datasource_num_id
+        AND t.rollup_category = s.rollup_category
+        AND t.month_of_year = s.month_of_year
+
+        WHEN MATCHED THEN
+        UPDATE SET
+            t.total_no_of_sales = s.total_no_of_sales,
+            t.sales_amount = s.sales_amount,
+            t.sales_amount_usd = s.sales_amount_usd,
+            t.create_date = s.create_date,
+            t.dl_updated_ts = '{max_cdc_value}'
+
+        WHEN NOT MATCHED THEN
+        INSERT (
+            datasource_num_id,
+            rollup_category,
+            month_of_year,
+            total_no_of_sales,
+            sales_amount,
+            sales_amount_usd,
+            create_date,
+            dl_load_ts,
+            dl_updated_ts
+        )
+        VALUES (
+            s.datasource_num_id,
+            s.rollup_category,
+            s.month_of_year,
+            s.total_no_of_sales,
+            s.sales_amount,
+            s.sales_amount_usd,
+            s.create_date,
+            '{max_cdc_value}',
+            '{max_cdc_value}'
+        )
+    """)
+
+    results = {
+        "Status": "Success",
+        "dq_summary": dq_results,
+        "cdc_value": str(max_cdc_value)
+    }
+
+    dbutils.notebook.exit(json.dumps(results))
+
+except Exception as e:
+    results = {
+        "Status": "Failed",
+        "error_message": str(e),
+        "cdc_value": str(min_cdc_value)
+    }
+
+    raise Exception(json.dumps(results))
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select count(*) from gld_eudm.digital_dashboard_control_summary
