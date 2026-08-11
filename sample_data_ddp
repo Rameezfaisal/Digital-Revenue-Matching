@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS gld_eudm.digital_dashboard_control_summary (
     dl_load_ts TIMESTAMP COMMENT 'Data lake load timestamp',
     dl_updated_ts TIMESTAMP COMMENT 'Data lake update timestamp'
 )
+CLUSTER BY (datasource_num_id, rollup_category, month_of_year)
 USING DELTA
 TBLPROPERTIES (
     'delta.appendOnly' = 'false',
