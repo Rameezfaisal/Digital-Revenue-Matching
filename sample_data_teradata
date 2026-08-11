@@ -1,15 +1,12 @@
-datasource_num_id	dbx_record_count
-3000	24505753
-4000	2170214
-5000	240809
-6000	1030751
-7000	591572
-8000	1513409
-9000	839170
-12001	2782256
-12002	2934761
-12003	265816
-12004	22265368
-12005	871069
-13000	310910
-14000	801884
+# Check Run Condition (6th Work Day) - Exits early if condition is not met
+
+check_workday_df = spark.sql(f"""
+SELECT count(*) as valid_day
+FROM brz_teradata.calendar_work_day
+WHERE day_of_month = 10 AND calendar_date = current_date()
+""")
+
+if check_workday_df.collect()[0]["valid_day"] == 0:
+    dbutils.notebook.exit('{"Status": "Skipped", "Reason": "Today is not the 6th working day."}')
+
+print("Run condition met. Proceeding with load.")
