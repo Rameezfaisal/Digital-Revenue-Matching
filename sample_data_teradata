@@ -1,12 +1,74 @@
-# Check Run Condition (6th Work Day) - Exits early if condition is not met
+databricks ouput
 
-check_workday_df = spark.sql(f"""
-SELECT count(*) as valid_day
-FROM brz_teradata.calendar_work_day
-WHERE day_of_month = 10 AND calendar_date = current_date()
-""")
+datasource_num_id	spark_count
+3000	102
+4000	376
+5000	61
+6000	110
+7000	87
+8000	225
+9000	318
+12001	158
+12002	202
+12003	112
+12004	174
+12005	84
+13000	262
+14000	265
 
-if check_workday_df.collect()[0]["valid_day"] == 0:
-    dbutils.notebook.exit('{"Status": "Skipped", "Reason": "Today is not the 6th working day."}')
 
-print("Run condition met. Proceeding with load.")
+teradata output
+
+
+	datasource_num_id	td_count
+1	3,000	151
+2	4,000	198
+3	5,000	198
+4	6,000	181
+5	7,000	68
+6	8,000	162
+7	9,000	264
+8	10,000	112
+9	11,000	115
+10	12,001	290
+11	12,002	29
+12	12,003	29
+13	12,004	116
+14	12,005	58
+15	13,000	264
+16	14,000	266
+
+
+
+databricks output
+
+null_rollup_count	null_month_count
+1196	0
+
+
+databricks output
+
+
+datasource_num_id	min_month	max_month	distinct_months
+3000	2018-01	2026-06	102
+4000	2005-12	2026-02	179
+5000	2021-01	2025-12	59
+6000	2019-01	2026-02	86
+7000	2019-01	2026-02	86
+8000	2019-01	2026-02	86
+9000	2018-08	2026-06	95
+12001	2020-01	2026-02	74
+12002	2020-01	2026-06	78
+12003	2020-01	2026-02	74
+12004	2020-01	2026-07	79
+12005	2020-01	2026-02	74
+13000	2020-01	2025-07	67
+14000	2019-01	2026-02	86
+
+
+teradata output
+
+min_month, max_month query not working in teradata
+
+and last query is also not work
+
