@@ -1,19 +1,59 @@
-CREATE TABLE IF NOT EXISTS gld_eudm.digital_dashboard_control_summary (
-    datasource_num_id INT COMMENT 'Unique identifier for the data source',
-    rollup_category STRING COMMENT 'Category for digital rollup',
-    month_of_year STRING COMMENT 'Invoice month and year in YYYY-MM format',
-    total_no_of_sales BIGINT COMMENT 'Aggregated total number of sales',
-    sales_amount DECIMAL(38, 2) COMMENT 'Aggregated total sales amount in local currency',
-    sales_amount_usd DECIMAL(38, 2) COMMENT 'Aggregated total sales amount converted to USD',
-    create_date DATE COMMENT 'Date the record was created/processed',
-    dl_load_ts TIMESTAMP COMMENT 'Data lake load timestamp',
-    dl_updated_ts TIMESTAMP COMMENT 'Data lake update timestamp'
-)
-CLUSTER BY (datasource_num_id, rollup_category, month_of_year)
-USING DELTA
-TBLPROPERTIES (
-    'delta.appendOnly' = 'false',
-    'delta.autoOptimize.optimizeWrite' = 'true',
-    'delta.autoOptimize.autoCompact' = 'true'
-)
-COMMENT 'Summary table for digital dashboard control aggregated by datasource, rollup category, and month';
+SELECT datasource_num_id, COUNT(*) AS spark_count
+FROM gld_eudm.digital_dashboard_control_summary
+GROUP BY datasource_num_id
+ORDER BY datasource_num_id;
+
+
+
+
+
+SELECT datasource_num_id, COUNT(*) AS td_count
+FROM dss_marts.digital_dashboard_control_summary
+GROUP BY datasource_num_id
+ORDER BY datasource_num_id;
+
+
+
+
+
+SELECT 
+    COUNT(CASE WHEN rollup_category IS NULL THEN 1 END) AS null_rollup_count,
+    COUNT(CASE WHEN month_of_year IS NULL THEN 1 END) AS null_month_count
+FROM gld_eudm.digital_dashboard_control_summary;
+
+
+
+
+SELECT 
+    datasource_num_id, 
+    MIN(month_of_year) AS min_month, 
+    MAX(month_of_year) AS max_month,
+    COUNT(DISTINCT month_of_year) AS distinct_months
+FROM gld_eudm.digital_dashboard_control_summary
+GROUP BY datasource_num_id
+ORDER BY datasource_num_id;
+
+
+
+
+SELECT 
+    datasource_num_id, 
+    MIN(TO_CHAR(DATE_INVOICE, 'YYYY-MM')) AS min_month, 
+    MAX(TO_CHAR(DATE_INVOICE, 'YYYY-MM')) AS max_month,
+    COUNT(DISTINCT TO_CHAR(DATE_INVOICE, 'YYYY-MM')) AS distinct_months
+FROM dss_marts.digital_dashboard_control_summary
+GROUP BY datasource_num_id
+ORDER BY datasource_num_id;
+
+
+
+
+
+
+SELECT spark.*
+FROM gld_eudm.digital_dashboard_control_summary spark
+LEFT ANTI JOIN tmp_teradata_summary td
+    ON spark.datasource_num_id = td.datasource_num_id
+   AND COALESCE(spark.rollup_category, '') = COALESCE(td.rollup_category, '')
+   AND spark.month_of_year = td.month_of_year;
+
