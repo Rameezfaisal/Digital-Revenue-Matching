@@ -1,15 +1,68 @@
+# Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
+# MAGIC %md
+# MAGIC Name        : gld_eudm.vw_digital_revenue_dashboard <br/>
+# MAGIC Catalog     : WESCO, ATC <br/>
+# MAGIC Description : This notebook creates a view for the digital revenue dashboard, aggregating historical sales data (excluding the current month) directly from the silver control table. <br/>
+# MAGIC Job ID:  <br/>
+# MAGIC Operation ID:  <br/>
+# MAGIC
+# MAGIC #### Change History - Must be updated for every change.<br/>
+# MAGIC |Version|Author|Date|Ticket|Short Description|
+# MAGIC |-------|------|----|------|-----------------|
+# MAGIC |1.0|Data Engineer|11-August-2026|TBD|Converted Teradata audit script to a Databricks Gold View|
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- Create the view by aggregating the silver table. 
+# MAGIC -- The current month is excluded to match the legacy Teradata script's logic.
+# MAGIC
+# MAGIC CREATE OR REPLACE VIEW gld_eudm.vw_digital_revenue_dashboard AS
+# MAGIC SELECT 
+# MAGIC     datasource_num_id,
+# MAGIC     rollup_category,
+# MAGIC     date_format(date_invoice, 'yyyy-MM') AS month_of_year,
+# MAGIC     SUM(sales_amount) AS total_sales_amount,
+# MAGIC     SUM(sales_amount_usd) AS total_sales_amount_usd
+# MAGIC FROM slv_salesorder.digital_dashboard_control
+# MAGIC WHERE date_format(date_invoice, 'yyyy-MM') <> date_format(current_date(), 'yyyy-MM')
+# MAGIC GROUP BY 
+# MAGIC     datasource_num_id,
+# MAGIC     rollup_category,
+# MAGIC     date_format(date_invoice, 'yyyy-MM');
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- Validate the view creation
+# MAGIC SELECT * FROM gld_eudm.vw_digital_revenue_dashboard LIMIT 10;
+
+
+
+
+
+
+-- Find records in the recalculated view that are NOT in the physical summary table
 SELECT 
-    datasource_num_id, 
-    MIN(month_of_year) AS min_month, 
-    MAX(month_of_year) AS max_month,
-    COUNT(DISTINCT month_of_year) AS distinct_months
-FROM dss_marts.digital_dashboard_control_summary
-GROUP BY datasource_num_id
-ORDER BY datasource_num_id;
+    datasource_num_id,
+    rollup_category,
+    month_of_year,
+    total_sales_amount,
+    total_sales_amount_usd
+FROM gld_eudm.vw_digital_revenue_dashboard
 
+EXCEPT
 
-
-
+-- Find records in the physical summary table that are NOT in the recalculated view
 SELECT 
-    COUNT(CASE WHEN rollup_category IS NULL THEN 1 END) AS null_rollup_count
-FROM dss_marts.digital_dashboard_control_summary;
+    datasource_num_id,
+    rollup_category,
+    month_of_year,
+    sales_amount AS total_sales_amount,
+    sales_amount_usd AS total_sales_amount_usd
+FROM gld_eudm.digital_dashboard_control_summary
+WHERE month_of_year <> date_format(current_date(), 'yyyy-MM');
