@@ -1,9 +1,11 @@
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ### Data Quality Audit: Mismatch Check
-# MAGIC Replicating the legacy Teradata MINUS script. Captures any mismatches between the view and the summary table.
+# MAGIC Replicating the legacy Teradata MINUS script. Captures any mismatches between the view and the summary table and logs them with an execution timestamp.
 
 # COMMAND ----------
+
+from pyspark.sql.functions import current_timestamp
 
 # 1. Run the Except/Minus query and load it into a DataFrame
 mismatch_df = spark.sql("""
@@ -34,18 +36,16 @@ mismatch_count = mismatch_df.count()
 if mismatch_count > 0:
     print(f"Data validation failed: Found {mismatch_count} mismatched records.")
     
-    # Write the mismatched records to an audit table so the data team can investigate
-    mismatch_df.write \
+    # Add an audit timestamp column to record exactly when this mismatch was detected
+    audit_df = mismatch_df.withColumn("audit_timestamp", current_timestamp())
+    
+    # Write the mismatched records to an audit table in 'append' mode to keep a historical log
+    audit_df.write \
         .format("delta") \
-        .mode("overwrite") \
+        .mode("append") \
         .saveAsTable("gld_eudm.digital_dashboard_records_mismatch")
     
-    # Note: If your downstream processes strictly require a CSV file instead of a Delta table, 
-    # you can write to a Unity Catalog Volume like this instead:
-    # mismatch_df.write.mode("overwrite").option("header", "true").csv("/Volumes/wesco/atc/etl_exports/Digital_dashboard_records_mismatch")
-
-    # Raise an exception to fail the Databricks Job. 
-    # (Configure your Databricks Job UI to send failure emails to assistme@..., bmoodey@..., etc. upon failure)
+    # Raise an exception to fail the Databricks Job and trigger failure emails
     raise Exception(f"Digital Dashboard Mismatch Audit Failed! {mismatch_count} rows differ. Please query gld_eudm.digital_dashboard_records_mismatch for details.")
 
 else:
