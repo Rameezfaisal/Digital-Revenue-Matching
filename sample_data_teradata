@@ -1,58 +1,20 @@
-try:
-    spark.sql(f"""
-        INSERT INTO slv_salesorder.digital_dashboard_control (
-            datasource_num_id,
-            sbu,
-            ent_type,
-            rollup_category,
-            date_invoice,
-            total_no_of_sales,
-            sales_amount,
-            currency,
-            data_source_name,
-            cust_name,
-            invoice_no,
-            order_number,
-            currency_conversion,
-            sales_amount_USD,
-            CREATE_DATE,
-            dl_load_ts,
-            dl_updated_ts
-        )
-        SELECT 
-            datasource_num_id,
-            sbu,
-            ent_type,
-            rollup_category,
-            date_invoice,
-            total_no_of_sales,
-            sales_amount,
-            currency,
-            data_source_name,
-            cust_name,
-            invoice_no,
-            order_number,
-            currency_conversion,
-            sales_amount_USD,
-            CREATE_DATE,
-            '{max_cdc_value}',
-            '{max_cdc_value}'
-        FROM final_df
-    """)
+mismatch_df = spark.sql("""
+    SELECT 
+        datasource_num_id,
+        rollup_category,
+        month_of_year,
+        total_sales_amount,
+        total_sales_amount_usd
+    FROM gld_eudm.vw_digital_revenue_dashboard
 
-    results = {
-        "Status": "Success",
-        "dq_summary": dq_results,
-        "cdc_value": str(max_cdc_value)
-    }
+    EXCEPT
 
-    dbutils.notebook.exit(json.dumps(results))
-
-except Exception as e:
-    results = {
-        "Status": "Failed",
-        "error_message": str(e),
-        "cdc_value": str(min_cdc_value)
-    }
-
-    raise Exception(json.dumps(results))
+    SELECT 
+        datasource_num_id,
+        rollup_category,
+        month_of_year,
+        sales_amount AS total_sales_amount,
+        sales_amount_usd AS total_sales_amount_usd
+    FROM gld_eudm.digital_dashboard_control_summary
+    WHERE month_of_year <> date_format(current_date(), 'yyyy-MM')
+""")
