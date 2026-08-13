@@ -1,32 +1,6 @@
 try:
     spark.sql(f"""
-        MERGE INTO slv_salesorder.digital_dashboard_control AS t
-        USING (
-            SELECT * 
-            FROM final_df
-        ) AS s
-        ON t.datasource_num_id = s.datasource_num_id
-        AND t.invoice_no = s.invoice_no
-        AND t.order_number = s.order_number
-        AND t.date_invoice = s.date_invoice
-        AND coalesce(t.ent_type, '') = coalesce(s.ent_type, '')
-        AND coalesce(t.rollup_category, '') = coalesce(s.rollup_category, '')
-        AND coalesce(t.currency, '') = coalesce(s.currency, '')
-
-        WHEN MATCHED THEN
-        UPDATE SET
-            t.sbu = s.sbu,
-            t.total_no_of_sales = s.total_no_of_sales,
-            t.sales_amount = s.sales_amount,
-            t.data_source_name = s.data_source_name,
-            t.cust_name = s.cust_name,
-            t.currency_conversion = s.currency_conversion,
-            t.sales_amount_USD = s.sales_amount_USD,
-            t.CREATE_DATE = s.CREATE_DATE,
-            t.dl_updated_ts = '{max_cdc_value}'
-
-        WHEN NOT MATCHED THEN
-        INSERT (
+        INSERT INTO slv_salesorder.digital_dashboard_control (
             datasource_num_id,
             sbu,
             ent_type,
@@ -45,23 +19,40 @@ try:
             dl_load_ts,
             dl_updated_ts
         )
-        VALUES (
-            s.datasource_num_id,
-            s.sbu,
-            s.ent_type,
-            s.rollup_category,
-            s.date_invoice,
-            s.total_no_of_sales,
-            s.sales_amount,
-            s.currency,
-            s.data_source_name,
-            s.cust_name,
-            s.invoice_no,
-            s.order_number,
-            s.currency_conversion,
-            s.sales_amount_USD,
-            s.CREATE_DATE,
+        SELECT 
+            datasource_num_id,
+            sbu,
+            ent_type,
+            rollup_category,
+            date_invoice,
+            total_no_of_sales,
+            sales_amount,
+            currency,
+            data_source_name,
+            cust_name,
+            invoice_no,
+            order_number,
+            currency_conversion,
+            sales_amount_USD,
+            CREATE_DATE,
             '{max_cdc_value}',
             '{max_cdc_value}'
-        )
+        FROM final_df
     """)
+
+    results = {
+        "Status": "Success",
+        "dq_summary": dq_results,
+        "cdc_value": str(max_cdc_value)
+    }
+
+    dbutils.notebook.exit(json.dumps(results))
+
+except Exception as e:
+    results = {
+        "Status": "Failed",
+        "error_message": str(e),
+        "cdc_value": str(min_cdc_value)
+    }
+
+    raise Exception(json.dumps(results))
