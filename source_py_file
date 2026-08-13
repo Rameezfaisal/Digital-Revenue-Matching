@@ -5,3 +5,20 @@
         AND coalesce(t.ent_type, '') = coalesce(s.ent_type, '')
         AND coalesce(t.rollup_category, '') = coalesce(s.rollup_category, '')
         AND coalesce(t.currency, '') = coalesce(s.currency, '')
+
+
+
+-- Change this:
+(cast(sum(sf.sales_amount) as DECIMAL(38,2)) * coalesce(cr.conversion_rate, 1)) as sales_amount_USD
+
+-- To this:
+CAST((CAST(SUM(sf.sales_amount) AS DECIMAL(38,2)) * CAST(coalesce(cr.conversion_rate, 1) AS DECIMAL(38,6))) AS DECIMAL(38,2)) AS sales_amount_USD
+
+
+
+
+
+
+CREATE OR REPLACE TEMPORARY VIEW ref_conversion_rates AS
+SELECT from_currency, to_currency, cnv_year, cnv_month, conversion_rate
+FROM brz_teradata.ora_conv_rates_mthly where dl_load_date > '{min_cdc_value}'
