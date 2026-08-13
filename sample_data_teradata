@@ -1,48 +1,67 @@
-Currency Conversion Math Check
+try:
+    spark.sql(f"""
+        MERGE INTO slv_salesorder.digital_dashboard_control AS t
+        USING (
+            SELECT * 
+            FROM final_df
+        ) AS s
+        ON t.datasource_num_id = s.datasource_num_id
+        AND t.invoice_no = s.invoice_no
+        AND t.order_number = s.order_number
+        AND t.date_invoice = s.date_invoice
+        AND coalesce(t.ent_type, '') = coalesce(s.ent_type, '')
+        AND coalesce(t.rollup_category, '') = coalesce(s.rollup_category, '')
+        AND coalesce(t.currency, '') = coalesce(s.currency, '')
 
-in teradata it returned 0 count but in databricks it returns 96213 count.
-this is the same data in databricks
+        WHEN MATCHED THEN
+        UPDATE SET
+            t.sbu = s.sbu,
+            t.total_no_of_sales = s.total_no_of_sales,
+            t.sales_amount = s.sales_amount,
+            t.data_source_name = s.data_source_name,
+            t.cust_name = s.cust_name,
+            t.currency_conversion = s.currency_conversion,
+            t.sales_amount_USD = s.sales_amount_USD,
+            t.CREATE_DATE = s.CREATE_DATE,
+            t.dl_updated_ts = '{max_cdc_value}'
 
-datasource_num_id	currency	sales_amount	currency_conversion	sales_amount_USD	calculated_usd	variance
-12004	MXN	297466.66	0.055531	16518.59	16518.62	0.03
-12004	MXN	186738.74	0.058049	10840.02	10840.00	0.02
-12004	MXN	54576.02	0.048849	2666.01	2665.98	0.03
-12004	MXN	119673.37	0.057272	6853.91	6853.93	0.02
-12004	INR	211016.00	0.011427	2411.26	2411.28	0.02
-12004	MXN	205806.51	0.050980	10492.10	10492.02	0.08
-12004	PHP	98480.00	0.016463	1621.23	1621.28	0.05
-12004	MXN	920833.86	0.054658	50331.12	50330.94	0.18
-12004	KRW	8355600.00	0.000699	5844.66	5840.56	4.10
-12004	INR	7078880.09	0.011660	82538.33	82539.74	1.41
-
-
-Missing Conversion Rate Check
-
-teradata output
-
-	datasource_num_id	currency	missing_rate_count
-1	12,004	HKD	1
-2	3,000	CAD	5,771
-3	12,004	INR	2
-4	12,004	MAD	7
-5	4,000	JPY	85
-6	14,000	CAD	10,352
-7	12,004	MXP	531
-8	11,000	CAD	44,025
-9	12,004	KRW	1
-10	12,004	CNY	3
-11	12,004	PHP	1
-
-databricks output
-
-datasource_num_id	currency	missing_rate_count
-12004	SEK	2
-12004	MAD	8
-12004	MXN	150
-12004	CNY	11
-12004	NOK	5
-12004	MYR	1
-12004	INR	3
-12004	KRW	2
-
-
+        WHEN NOT MATCHED THEN
+        INSERT (
+            datasource_num_id,
+            sbu,
+            ent_type,
+            rollup_category,
+            date_invoice,
+            total_no_of_sales,
+            sales_amount,
+            currency,
+            data_source_name,
+            cust_name,
+            invoice_no,
+            order_number,
+            currency_conversion,
+            sales_amount_USD,
+            CREATE_DATE,
+            dl_load_ts,
+            dl_updated_ts
+        )
+        VALUES (
+            s.datasource_num_id,
+            s.sbu,
+            s.ent_type,
+            s.rollup_category,
+            s.date_invoice,
+            s.total_no_of_sales,
+            s.sales_amount,
+            s.currency,
+            s.data_source_name,
+            s.cust_name,
+            s.invoice_no,
+            s.order_number,
+            s.currency_conversion,
+            s.sales_amount_USD,
+            s.CREATE_DATE,
+            '{max_cdc_value}',
+            '{max_cdc_value}'
+        )
+    """)
