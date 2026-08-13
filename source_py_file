@@ -6,3 +6,16 @@ CAST(
     CAST(SUM(sf.sales_amount) AS DECIMAL(38,2)) * 
     CAST(coalesce(cr.conversion_rate, 1) AS DECIMAL(38,10)) 
 AS DECIMAL(38,2)) as sales_amount_USD
+
+
+
+
+
+
+
+
+-- Change this:
+(cast(sum(sf.sales_amount) as DECIMAL(38,2)) * coalesce(cr.conversion_rate, 1)) as sales_amount_USD
+
+-- To this:
+CAST((CAST(SUM(sf.sales_amount) AS DECIMAL(38,2)) * CAST(coalesce(cr.conversion_rate, 1) AS DECIMAL(38,6))) AS DECIMAL(38,2)) AS sales_amount_USD
