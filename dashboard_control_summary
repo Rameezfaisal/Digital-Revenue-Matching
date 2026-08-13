@@ -1,4 +1,3 @@
-
 # Databricks notebook source
 # /// script
 # [tool.databricks.environment]
@@ -6,15 +5,15 @@
 # ///
 # MAGIC %md
 # MAGIC Name        : gld_eudm.digital_dashboard_control_summary <br/>
-# MAGIC Catalog     : WESCO, ATC <br/>
-# MAGIC Description : This notebook creates the digital_dashboard_control_summary table by aggregating data from the digital_dashboard_control table. <br/>
+# MAGIC Catalog     : WESCO, EECOL <br/>
+# MAGIC Description : This notebook will be creating digital_dashboard_control_summary for vw_digital_revenue_dashboard <br/>
 # MAGIC Job ID:  <br/>
 # MAGIC Operation ID:  <br/>
 # MAGIC
 # MAGIC #### Change History - Must be updated for every change.<br/>
 # MAGIC |Version|Author|Date|Ticket|Short Description|
 # MAGIC |-------|------|----|------|-----------------|
-# MAGIC |1.0|Data Engineer|11-August-2026|TBD|Converted Teradata summary load to Databricks format|
+# MAGIC |1.0|Rameez|11-August-2026|DL-15445|created this notebook to fill digital_dashboard_control_summary table which is used  to replicate reconciliation framework based on the Teradata implementation that ensures the digital channel revenue is properly reflected in reporting.|
 
 # COMMAND ----------
 
@@ -48,20 +47,20 @@ else:
 
 # COMMAND ----------
 
-# Check Run Condition (6th Work Day) - Exits early if condition is not met
-
-check_workday_df = spark.sql(f"""
-SELECT count(*) as valid_day
-FROM brz_teradata.calendar_work_day
-WHERE day_of_month = 6 AND calendar_date = current_date()
-""")
-
-if check_workday_df.collect()[0]["valid_day"] == 0:
-    dbutils.notebook.exit('{"Status": "Skipped", "Reason": "Today is not the 6th working day."}')
-
-print("Run condition met. Proceeding with load.")
+# MAGIC %sql
+# MAGIC CREATE OR REPLACE TEMPORARY VIEW latest_dashboard_control AS
+# MAGIC SELECT * FROM (
+# MAGIC     SELECT *,
+# MAGIC         row_number() OVER (
+# MAGIC             PARTITION BY datasource_num_id, invoice_no, order_number, date_invoice, ent_type, rollup_category, currency
+# MAGIC             ORDER BY dl_updated_ts DESC
+# MAGIC         ) as dedup_row
+# MAGIC     FROM gld_eudm.digital_dashboard_control
+# MAGIC )
+# MAGIC WHERE dedup_row = 1;
 
 # COMMAND ----------
+
 
 main_df = spark.sql(f"""
 SELECT 
@@ -72,7 +71,7 @@ SELECT
     SUM(sales_amount) AS sales_amount,
     SUM(sales_amount_usd) AS sales_amount_usd,
     current_date() AS create_date
-FROM slv_salesorder.digital_dashboard_control 
+FROM latest_dashboard_control 
 WHERE datasource_num_id IN (3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12001, 12002, 12003, 12004, 12005, 13000, 14000)
   AND dl_updated_ts > '{min_cdc_value}'
 GROUP BY 
@@ -83,6 +82,7 @@ GROUP BY
 
 # COMMAND ----------
 
+# DBTITLE 1,Dq_Checks
 if Data_quality == 'Y':
     dq = create_dq_framework(spark)
     checks = [
@@ -105,30 +105,9 @@ else:
 
 # COMMAND ----------
 
-# - The below code performs a merge operation between selected source data with the target data
-# - Merges on composite key: datasource_num_id, rollup_category, month_of_year
-
 try:
     spark.sql(f"""
-        MERGE INTO gld_eudm.digital_dashboard_control_summary AS t
-        USING (
-            SELECT * 
-            FROM final_df
-        ) AS s
-        ON t.datasource_num_id = s.datasource_num_id
-        AND t.rollup_category = s.rollup_category
-        AND t.month_of_year = s.month_of_year
-
-        WHEN MATCHED THEN
-        UPDATE SET
-            t.total_no_of_sales = s.total_no_of_sales,
-            t.sales_amount = s.sales_amount,
-            t.sales_amount_usd = s.sales_amount_usd,
-            t.create_date = s.create_date,
-            t.dl_updated_ts = '{max_cdc_value}'
-
-        WHEN NOT MATCHED THEN
-        INSERT (
+        INSERT INTO gld_eudm.digital_dashboard_control_summary (
             datasource_num_id,
             rollup_category,
             month_of_year,
@@ -139,22 +118,21 @@ try:
             dl_load_ts,
             dl_updated_ts
         )
-        VALUES (
-            s.datasource_num_id,
-            s.rollup_category,
-            s.month_of_year,
-            s.total_no_of_sales,
-            s.sales_amount,
-            s.sales_amount_usd,
-            s.create_date,
-            '{max_cdc_value}',
-            '{max_cdc_value}'
-        )
+        SELECT 
+            datasource_num_id,
+            rollup_category,
+            month_of_year,
+            total_no_of_sales,
+            sales_amount,
+            sales_amount_usd,
+            create_date,
+            '{max_cdc_value}' AS dl_load_ts,
+            '{max_cdc_value}' AS dl_updated_ts
+        FROM final_df
     """)
 
     results = {
         "Status": "Success",
-        "dq_summary": dq_results,
         "cdc_value": str(max_cdc_value)
     }
 
@@ -171,5 +149,56 @@ except Exception as e:
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC select count(*) from gld_eudm.digital_dashboard_control_summary
+
+# try:
+#     spark.sql(f"""
+#         MERGE INTO gld_eudm.digital_dashboard_control_summary AS t
+#         USING (
+#             SELECT * 
+#             FROM final_df
+#         ) AS s
+#         ON t.datasource_num_id = s.datasource_num_id
+#         AND t.rollup_category = s.rollup_category
+#         AND t.month_of_year = s.month_of_year
+
+#         WHEN MATCHED THEN
+#         UPDATE SET
+#             t.total_no_of_sales = s.total_no_of_sales,
+#             t.sales_amount = s.sales_amount,
+#             t.sales_amount_usd = s.sales_amount_usd,
+#             t.create_date = s.create_date,
+#             t.dl_updated_ts = '{max_cdc_value}'
+
+#         WHEN NOT MATCHED THEN
+#         INSERT (
+#             datasource_num_id,
+#             rollup_category,
+#             month_of_year,
+#             total_no_of_sales,
+#             sales_amount,
+#             sales_amount_usd,
+#             create_date,
+#             dl_load_ts,
+#             dl_updated_ts
+#         )
+#         VALUES (
+#             s.datasource_num_id,
+#             s.rollup_category,
+#             s.month_of_year,
+#             s.total_no_of_sales,
+#             s.sales_amount,
+#             s.sales_amount_usd,
+#             s.create_date,
+#             '{max_cdc_value}',
+#             '{max_cdc_value}'
+#         )
+#     """)
+
+# except Exception as e:
+#     results = {
+#         "Status": "Failed",
+#         "error_message": str(e),
+#         "cdc_value": str(min_cdc_value)
+#     }
+
+#     raise Exception(json.dumps(results))
