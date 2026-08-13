@@ -1,21 +1,34 @@
--- 1. Update the standalone currency_conversion column:
-CAST(coalesce(cr.conversion_rate, 1) AS DECIMAL(38,10)) as currency_conversion,
-
--- 2. Update the sales_amount_USD math column:
-CAST(
-    CAST(SUM(sf.sales_amount) AS DECIMAL(38,2)) * 
-    CAST(coalesce(cr.conversion_rate, 1) AS DECIMAL(38,10)) 
-AS DECIMAL(38,2)) as sales_amount_USD
-
-
-
-
+    SELECT 
+    datasource_num_id,
+    currency,
+    sales_amount,
+    currency_conversion,
+    sales_amount_USD,
+    ROUND(CAST(sales_amount AS DECIMAL(38,2)) * currency_conversion, 2) AS calculated_usd,
+    ABS(sales_amount_USD - ROUND(CAST(sales_amount AS DECIMAL(38,2)) * currency_conversion, 2)) AS variance
+FROM gld_eudm.digital_dashboard_control
+WHERE ABS(sales_amount_USD - ROUND(CAST(sales_amount AS DECIMAL(38,2)) * currency_conversion, 2)) > 0.01
 
 
 
-
--- Change this:
-(cast(sum(sf.sales_amount) as DECIMAL(38,2)) * coalesce(cr.conversion_rate, 1)) as sales_amount_USD
-
--- To this:
-CAST((CAST(SUM(sf.sales_amount) AS DECIMAL(38,2)) * CAST(coalesce(cr.conversion_rate, 1) AS DECIMAL(38,6))) AS DECIMAL(38,2)) AS sales_amount_USD
+datasource_num_id	currency	sales_amount	currency_conversion	sales_amount_USD	calculated_usd	variance
+3000	CAD	307000.00	0.775194	237984.50	237984.56	0.06
+3000	CAD	52386.00	0.778634	40789.54	40789.52	0.02
+3000	CAD	97476.83	0.775194	75563.43	75563.45	0.02
+3000	CAD	44067.48	0.746938	32915.66	32915.68	0.02
+3000	CAD	52651.00	0.760052	40017.48	40017.50	0.02
+3000	CAD	688137.00	0.769290	529376.88	529376.91	0.03
+3000	CAD	86735.00	0.746938	64785.63	64785.67	0.04
+3000	CAD	33995.00	0.779362	26494.43	26494.41	0.02
+3000	CAD	366324.00	0.746938	273621.15	273621.32	0.17
+3000	CAD	170926.46	0.774713	132419.01	132418.95	0.06
+3000	CAD	23897.00	0.779362	18624.43	18624.41	0.02
+3000	CAD	47541.21	0.761441	36199.81	36199.83	0.02
+3000	CAD	38830.00	0.779362	30262.65	30262.63	0.02
+3000	CAD	-48037.45	0.795482	-38212.91	-38212.93	0.02
+3000	CAD	152852.61	0.739864	113090.12	113090.14	0.02
+3000	CAD	80299.03	0.778634	62523.58	62523.55	0.03
+3000	CAD	129162.24	0.778634	100570.15	100570.11	0.04
+3000	CAD	34550.00	0.746938	25806.69	25806.71	0.02
+3000	CAD	38765.50	0.746938	28955.41	28955.43	0.02
+3000	CAD	65160.00	0.761441	49615.47	49615.50	0.03
