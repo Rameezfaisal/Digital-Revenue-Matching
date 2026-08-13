@@ -6,18 +6,19 @@
 # MAGIC %md
 # MAGIC Name        : gld_eudm.vw_digital_revenue_dashboard <br/>
 # MAGIC Catalog     : WESCO, ATC <br/>
-# MAGIC Description : This notebook creates a view for the digital revenue dashboard, aggregating historical sales data (excluding the current month) directly from the gold control table. <br/>
+# MAGIC Description : This notebook creates a view for the digital revenue dashboard, compares it against the summary table, logs mismatches, and sends email alerts via SMTP. <br/>
 # MAGIC Job ID:  <br/>
 # MAGIC Operation ID:  <br/>
 # MAGIC
 # MAGIC #### Change History - Must be updated for every change.<br/>
 # MAGIC |Version|Author|Date|Ticket|Short Description|
 # MAGIC |-------|------|----|------|-----------------|
-# MAGIC |1.0|Data Engineer|11-August-2026|DL-15445|Converted Teradata audit script to a Databricks Gold View|
+# MAGIC |1.0|Data Engineer|11-August-2026|DL-15445|Converted Teradata audit script to a Databricks Gold View with SMTP notification|
 
 # COMMAND ----------
 
 dbutils.widgets.text("parameter_dictionary","""{"businessunit":"wesco"}""")
+dbutils.widgets.text("smtp_server", "mail.wescodist.com")  # Adjust SMTP server host if needed
 
 # COMMAND ----------
 
@@ -25,9 +26,62 @@ dbutils.widgets.text("parameter_dictionary","""{"businessunit":"wesco"}""")
 
 # COMMAND ----------
 
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
+import os
+from pyspark.sql.functions import current_timestamp
+
+# Configuration Settings
+SMTP_SERVER = dbutils.widgets.get("smtp_server")
+SMTP_PORT = 25  # Standard internal SMTP port
+SENDER_EMAIL = "noreply-databricks@wescodist.com"
+RECIPIENTS = [
+    "BI_Wesco_Integration_Support_L2@wescodist.com",
+    "srichard@wescodist.com",
+    "vgolla@wescodist.com",
+    "srilatha.mahankali@wescodist.com"
+]
+SUBJECT = "Digital Dashboard and Source records comparision Daily"
+LOCAL_CSV_PATH = "/tmp/Digital_dashboard_records_mismatch.csv"
+
+def send_smtp_email(subject, body, recipients, attachment_path=None):
+    """Utility function to send emails with optional attachments via SMTP."""
+    msg = MIMEMultipart()
+    msg['From'] = SENDER_EMAIL
+    msg['To'] = ", ".join(recipients)
+    msg['Subject'] = subject
+
+    msg.attach(MIMEText(body, 'plain'))
+
+    if attachment_path and os.path.exists(attachment_path):
+        filename = os.path.basename(attachment_path)
+        with open(attachment_path, "rb") as attachment:
+            part = MIMEBase("application", "octet-stream")
+            part.set_payload(attachment.read())
+        encoders.encode_base64(part)
+        part.add_header(
+            "Content-Disposition",
+            f"attachment; filename= {filename}",
+        )
+        msg.attach(part)
+
+    try:
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.sendmail(SENDER_EMAIL, recipients, msg.as_string())
+        server.quit()
+        print(f"Email sent successfully to {', '.join(recipients)}")
+    except Exception as e:
+        print(f"Failed to send email via SMTP: {str(e)}")
+        raise e
+
+# COMMAND ----------
+
 # MAGIC %sql
-# MAGIC -- Create the view by aggregating the deduplicated silver/gold table. 
-# MAGIC -- The current month is excluded to match the legacy Teradata script's logic.
+# MAGIC -- Create the view by aggregating the deduplicated silver/gold table.
+# MAGIC -- Current month is excluded to match legacy Teradata logic.
 # MAGIC
 # MAGIC CREATE OR REPLACE VIEW gld_eudm.vw_digital_revenue_dashboard AS
 # MAGIC WITH latest_dashboard_control AS (
@@ -56,8 +110,8 @@ dbutils.widgets.text("parameter_dictionary","""{"businessunit":"wesco"}""")
 
 # COMMAND ----------
 
+# Execute the Bidirectional Mismatch Audit Query
 mismatch_df = spark.sql("""
-    -- 1. Find records in the recalculated view that are NOT in the physical summary table
     (
         SELECT 
             datasource_num_id,
@@ -81,7 +135,6 @@ mismatch_df = spark.sql("""
     
     UNION ALL
 
-    -- 2. Find records in the physical summary table that are NOT in the recalculated view
     (
         SELECT 
             datasource_num_id,
@@ -106,23 +159,35 @@ mismatch_df = spark.sql("""
 
 # COMMAND ----------
 
-# 2. Count the mismatches
 mismatch_count = mismatch_df.count()
 
 if mismatch_count > 0:
     print(f"Data validation failed: Found {mismatch_count} mismatched records.")
     
-    # Add an audit timestamp column to record exactly when this mismatch was detected
+    # 1. Add audit timestamp and write to the Delta audit table
     audit_df = mismatch_df.withColumn("audit_timestamp", current_timestamp())
-    
-    # Write the mismatched records to an audit table in 'append' mode to keep a historical log
     audit_df.write \
         .format("delta") \
         .mode("append") \
         .saveAsTable("gld_eudm.digital_dashboard_records_mismatch")
     
-    # Raise an exception to fail the Databricks Job and trigger failure emails
+    # 2. Export mismatch records to a local CSV file for email attachment
+    mismatch_df.toPandas().to_csv(LOCAL_CSV_PATH, index=False)
+    
+    # 3. Send mismatch email with CSV attachment
+    email_body = "Please find attached the records summary having difference in source and digital dashboard control summary table."
+    send_smtp_email(SUBJECT, email_body, RECIPIENTS, attachment_path=LOCAL_CSV_PATH)
+    
+    # Clean up local temporary CSV file
+    if os.path.exists(LOCAL_CSV_PATH):
+        os.remove(LOCAL_CSV_PATH)
+        
+    # 4. Fail the notebook job run to alert pipeline orchestrator
     raise Exception(f"Digital Dashboard Mismatch Audit Failed! {mismatch_count} rows differ. Please query gld_eudm.digital_dashboard_records_mismatch for details.")
 
 else:
     print("Data validation passed: No mismatches found between the view and summary table.")
+    
+    # Send success email matching Teradata script behavior
+    email_body = "There is no mismatch between Digital Dashboard and Source Record"
+    send_smtp_email(SUBJECT, email_body, RECIPIENTS)
