@@ -1,22 +1,33 @@
+from pyspark.sql.types import StructType, StructField, StringType, DecimalType
+from pyspark.sql.functions import col, round, expr
 
-datasource_num_id	currency	sales_amount	currency_conversion	sales_amount_USD	calculated_usd	variance
-12004	JPY	3312000.00	0.006408	21223.96	21223.30	0.66
-12004	INR	556575.00	0.010992	6117.65	6117.87	0.22
-12004	MXN	325966.60	0.052978	17268.93	17269.06	0.13
-12004	MXN	34922.91	0.052978	1850.13	1850.15	0.02
-12004	INR	39031.00	0.011681	455.90	455.92	0.02
-12004	PHP	79625.36	0.017248	1373.35	1373.38	0.03
-12004	INR	1116767.04	0.011681	13044.40	13044.96	0.56
-12004	MXN	742182.38	0.048014	35635.22	35635.14	0.08
-12004	MXN	165572.52	0.054608	9041.60	9041.58	0.02
-12004	INR	2677029.00	0.011262	30149.77	30148.70	1.07
-12004	MXN	745156.64	0.057272	42676.46	42676.61	0.15
-12004	JPY	317890.00	0.006461	2053.82	2053.89	0.07
-12004	TWD	1082434.00	0.031200	33772.27	33771.94	0.33
-12004	INR	3680924.00	0.010547	38823.81	38822.71	1.10
-12004	INR	3952800.00	0.010547	41691.37	41690.18	1.19
-12004	MXN	-5121260.15	0.051446	-263470.40	-263468.35	2.05
-12004	MXN	108709.89	0.051446	5592.73	5592.69	0.04
-12004	MXN	58063.00	0.051446	2987.13	2987.11	0.02
-12004	JPY	777940.00	0.006494	5051.89	5051.94	0.05
-12004	MXN	65724.72	0.053908	3543.11	3543.09	0.02
+# 1. Create a Dummy DataFrame with the HIGH PRECISION rate from the raw data
+data = [("12004", "JPY", 3312000.00, 0.00640820048)]
+schema = StructType([
+    StructField("datasource_num_id", StringType(), True),
+    StructField("currency", StringType(), True),
+    StructField("sales_amount", DecimalType(38, 2), True),
+    StructField("raw_conversion_rate", DecimalType(38, 11), True) # Simulating bronze lake precision
+])
+
+df = spark.createDataFrame(data, schema)
+
+# 2. Replicate the Databricks notebook math
+test_df = df.withColumn(
+    "currency_conversion", 
+    col("raw_conversion_rate").cast("decimal(38,6)") # Simulating a truncated column save
+).withColumn(
+    "sales_amount_USD", 
+    (col("sales_amount") * col("raw_conversion_rate")).cast("decimal(38,2)") # How Databricks calculated the USD
+)
+
+# 3. Replicate the Validation Query Math
+validation_df = test_df.withColumn(
+    "calculated_usd",
+    round(col("sales_amount") * col("currency_conversion"), 2)
+).withColumn(
+    "variance",
+    abs(col("sales_amount_USD") - col("calculated_usd"))
+)
+
+display(validation_df)
