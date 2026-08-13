@@ -1,29 +1,3 @@
-# 1. Create the Dummy Data
-dummy_data = [
-    (12004, 'JPY', 3312000.00, 0.0064081998, 0.006408),
-    (12004, 'INR', 556575.00, 0.010991599, 0.010992)
-]
-columns = ["datasource", "currency", "sales_amount", "raw_rate_used_in_pipeline", "truncated_rate_in_table"]
-
-dummy_df = spark.createDataFrame(dummy_data, columns)
-dummy_df.createOrReplaceTempView("dummy_test")
-
-# 2. Test the Math
-spark.sql("""
-    SELECT 
-        datasource,
-        currency,
-        sales_amount,
-        raw_rate_used_in_pipeline,
-        truncated_rate_in_table,
-        
-        -- This mimics what Databricks actually saved into your sales_amount_USD column
-        ROUND(sales_amount * raw_rate_used_in_pipeline, 2) AS actual_usd_saved,
-        
-        -- This mimics what your validation query calculates and why it flags a variance
-        ROUND(sales_amount * truncated_rate_in_table, 2) AS validation_query_usd,
-        
-        -- The false variance
-        ABS(ROUND(sales_amount * raw_rate_used_in_pipeline, 2) - ROUND(sales_amount * truncated_rate_in_table, 2)) as false_variance
-    FROM dummy_test
-""").display()
+datasource	currency	sales_amount	raw_rate_used_in_pipeline	truncated_rate_in_table	actual_usd_saved	validation_query_usd	false_variance
+12004	JPY	3312000	0.0064081998	0.006408	21223.96	21223.3	0.6599999999998545
+12004	INR	556575	0.010991599	0.010992	6117.65	6117.87	0.22000000000025466
