@@ -1,89 +1,128 @@
-main_df = spark.sql(f"""
-WITH changed_months AS (
-    -- Find which months actually had new or updated data in this incremental run
-    SELECT DISTINCT date_format(date_invoice, 'yyyy-MM') AS month_of_year
-    FROM gld_eudm.digital_dashboard_control
-    WHERE dl_updated_ts > '{min_cdc_value}'
-)
-SELECT 
-    datasource_num_id,
-    rollup_category,
-    date_format(date_invoice, 'yyyy-MM') AS month_of_year,
-    SUM(total_no_of_sales) AS total_no_of_sales,
-    SUM(sales_amount) AS sales_amount,
-    SUM(sales_amount_usd) AS sales_amount_usd,
-    current_date() AS create_date
-FROM latest_dashboard_control 
-WHERE datasource_num_id IN (3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12001, 12002, 12003, 12004, 12005, 13000, 14000)
-  -- Only recalculate the full totals for months that had changes
-  AND date_format(date_invoice, 'yyyy-MM') IN (SELECT month_of_year FROM changed_months)
-GROUP BY 
-    datasource_num_id,
-    rollup_category,
-    date_format(date_invoice, 'yyyy-MM')
-""")
+# Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
+# MAGIC %md
+# MAGIC Name        : gld_eudm.vw_digital_revenue_dashboard <br/>
+# MAGIC Catalog     : WESCO, ATC <br/>
+# MAGIC Description : This notebook creates a view for the digital revenue dashboard, aggregating historical sales data (excluding the current month) directly from the gold control table. <br/>
+# MAGIC Job ID:  <br/>
+# MAGIC Operation ID:  <br/>
+# MAGIC
+# MAGIC #### Change History - Must be updated for every change.<br/>
+# MAGIC |Version|Author|Date|Ticket|Short Description|
+# MAGIC |-------|------|----|------|-----------------|
+# MAGIC |1.0|Data Engineer|11-August-2026|DL-15445|Converted Teradata audit script to a Databricks Gold View|
 
+# COMMAND ----------
 
+dbutils.widgets.text("parameter_dictionary","""{"businessunit":"wesco"}""")
 
+# COMMAND ----------
 
+# MAGIC %run /Workspace/DE-Transformation/utilities/job_parameters_and_environment_configuration
 
+# COMMAND ----------
 
-try:
-    spark.sql(f"""
-        MERGE INTO gld_eudm.digital_dashboard_control_summary AS t
-        USING (
-            SELECT * 
-            FROM final_df
-        ) AS s
-        ON t.datasource_num_id = s.datasource_num_id
-        AND coalesce(t.rollup_category, '') = coalesce(s.rollup_category, '')
-        AND t.month_of_year = s.month_of_year
+# MAGIC %sql
+# MAGIC -- Create the view by aggregating the deduplicated silver/gold table. 
+# MAGIC -- The current month is excluded to match the legacy Teradata script's logic.
+# MAGIC
+# MAGIC CREATE OR REPLACE VIEW gld_eudm.vw_digital_revenue_dashboard AS
+# MAGIC WITH latest_dashboard_control AS (
+# MAGIC     SELECT * FROM (
+# MAGIC         SELECT *,
+# MAGIC             row_number() OVER (
+# MAGIC                 PARTITION BY datasource_num_id, invoice_no, order_number, date_invoice, ent_type, rollup_category, currency
+# MAGIC                 ORDER BY dl_updated_ts DESC
+# MAGIC             ) as dedup_row
+# MAGIC         FROM gld_eudm.digital_dashboard_control
+# MAGIC     )
+# MAGIC     WHERE dedup_row = 1
+# MAGIC )
+# MAGIC SELECT 
+# MAGIC     datasource_num_id,
+# MAGIC     rollup_category,
+# MAGIC     date_format(date_invoice, 'yyyy-MM') AS month_of_year,
+# MAGIC     SUM(sales_amount) AS total_sales_amount,
+# MAGIC     SUM(sales_amount_usd) AS total_sales_amount_usd
+# MAGIC FROM latest_dashboard_control
+# MAGIC WHERE date_format(date_invoice, 'yyyy-MM') <> date_format(current_date(), 'yyyy-MM')
+# MAGIC GROUP BY 
+# MAGIC     datasource_num_id,
+# MAGIC     rollup_category,
+# MAGIC     date_format(date_invoice, 'yyyy-MM');
 
-        WHEN MATCHED THEN
-        UPDATE SET
-            t.total_no_of_sales = s.total_no_of_sales,
-            t.sales_amount = s.sales_amount,
-            t.sales_amount_usd = s.sales_amount_usd,
-            t.create_date = s.create_date,
-            t.dl_updated_ts = '{max_cdc_value}'
+# COMMAND ----------
 
-        WHEN NOT MATCHED THEN
-        INSERT (
+mismatch_df = spark.sql("""
+    -- 1. Find records in the recalculated view that are NOT in the physical summary table
+    (
+        SELECT 
             datasource_num_id,
             rollup_category,
             month_of_year,
-            total_no_of_sales,
-            sales_amount,
-            sales_amount_usd,
-            create_date,
-            dl_load_ts,
-            dl_updated_ts
-        )
-        VALUES (
-            s.datasource_num_id,
-            s.rollup_category,
-            s.month_of_year,
-            s.total_no_of_sales,
-            s.sales_amount,
-            s.sales_amount_usd,
-            s.create_date,
-            '{max_cdc_value}',
-            '{max_cdc_value}'
-        )
-    """)
+            total_sales_amount,
+            total_sales_amount_usd
+        FROM gld_eudm.vw_digital_revenue_dashboard
 
-    results = {
-        "Status": "Success",
-        "cdc_value": str(max_cdc_value)
-    }
+        EXCEPT
 
-    dbutils.notebook.exit(json.dumps(results))
+        SELECT 
+            datasource_num_id,
+            rollup_category,
+            month_of_year,
+            sales_amount AS total_sales_amount,
+            sales_amount_usd AS total_sales_amount_usd
+        FROM gld_eudm.digital_dashboard_control_summary
+        WHERE month_of_year <> date_format(current_date(), 'yyyy-MM')
+    )
+    
+    UNION ALL
 
-except Exception as e:
-    results = {
-        "Status": "Failed",
-        "error_message": str(e),
-        "cdc_value": str(min_cdc_value)
-    }
+    -- 2. Find records in the physical summary table that are NOT in the recalculated view
+    (
+        SELECT 
+            datasource_num_id,
+            rollup_category,
+            month_of_year,
+            sales_amount AS total_sales_amount,
+            sales_amount_usd AS total_sales_amount_usd
+        FROM gld_eudm.digital_dashboard_control_summary
+        WHERE month_of_year <> date_format(current_date(), 'yyyy-MM')
+        
+        EXCEPT
 
-    raise Exception(json.dumps(results))
+        SELECT 
+            datasource_num_id,
+            rollup_category,
+            month_of_year,
+            total_sales_amount,
+            total_sales_amount_usd
+        FROM gld_eudm.vw_digital_revenue_dashboard
+    )
+""")
+
+# COMMAND ----------
+
+# 2. Count the mismatches
+mismatch_count = mismatch_df.count()
+
+if mismatch_count > 0:
+    print(f"Data validation failed: Found {mismatch_count} mismatched records.")
+    
+    # Add an audit timestamp column to record exactly when this mismatch was detected
+    audit_df = mismatch_df.withColumn("audit_timestamp", current_timestamp())
+    
+    # Write the mismatched records to an audit table in 'append' mode to keep a historical log
+    audit_df.write \
+        .format("delta") \
+        .mode("append") \
+        .saveAsTable("gld_eudm.digital_dashboard_records_mismatch")
+    
+    # Raise an exception to fail the Databricks Job and trigger failure emails
+    raise Exception(f"Digital Dashboard Mismatch Audit Failed! {mismatch_count} rows differ. Please query gld_eudm.digital_dashboard_records_mismatch for details.")
+
+else:
+    print("Data validation passed: No mismatches found between the view and summary table.")
