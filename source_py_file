@@ -1,33 +1,29 @@
-from pyspark.sql.types import StructType, StructField, StringType, DecimalType
-from pyspark.sql.functions import col, round, expr
+# 1. Create the Dummy Data
+dummy_data = [
+    (12004, 'JPY', 3312000.00, 0.0064081998, 0.006408),
+    (12004, 'INR', 556575.00, 0.010991599, 0.010992)
+]
+columns = ["datasource", "currency", "sales_amount", "raw_rate_used_in_pipeline", "truncated_rate_in_table"]
 
-# 1. Create a Dummy DataFrame with the HIGH PRECISION rate from the raw data
-data = [("12004", "JPY", 3312000.00, 0.00640820048)]
-schema = StructType([
-    StructField("datasource_num_id", StringType(), True),
-    StructField("currency", StringType(), True),
-    StructField("sales_amount", DecimalType(38, 2), True),
-    StructField("raw_conversion_rate", DecimalType(38, 11), True) # Simulating bronze lake precision
-])
+dummy_df = spark.createDataFrame(dummy_data, columns)
+dummy_df.createOrReplaceTempView("dummy_test")
 
-df = spark.createDataFrame(data, schema)
-
-# 2. Replicate the Databricks notebook math
-test_df = df.withColumn(
-    "currency_conversion", 
-    col("raw_conversion_rate").cast("decimal(38,6)") # Simulating a truncated column save
-).withColumn(
-    "sales_amount_USD", 
-    (col("sales_amount") * col("raw_conversion_rate")).cast("decimal(38,2)") # How Databricks calculated the USD
-)
-
-# 3. Replicate the Validation Query Math
-validation_df = test_df.withColumn(
-    "calculated_usd",
-    round(col("sales_amount") * col("currency_conversion"), 2)
-).withColumn(
-    "variance",
-    abs(col("sales_amount_USD") - col("calculated_usd"))
-)
-
-display(validation_df)
+# 2. Test the Math
+spark.sql("""
+    SELECT 
+        datasource,
+        currency,
+        sales_amount,
+        raw_rate_used_in_pipeline,
+        truncated_rate_in_table,
+        
+        -- This mimics what Databricks actually saved into your sales_amount_USD column
+        ROUND(sales_amount * raw_rate_used_in_pipeline, 2) AS actual_usd_saved,
+        
+        -- This mimics what your validation query calculates and why it flags a variance
+        ROUND(sales_amount * truncated_rate_in_table, 2) AS validation_query_usd,
+        
+        -- The false variance
+        ABS(ROUND(sales_amount * raw_rate_used_in_pipeline, 2) - ROUND(sales_amount * truncated_rate_in_table, 2)) as false_variance
+    FROM dummy_test
+""").display()
