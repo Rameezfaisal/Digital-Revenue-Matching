@@ -1,96 +1,54 @@
-# COMMAND ----------
-spark.sql(f"""
-CREATE OR REPLACE TEMPORARY VIEW sf_sales_fact AS
-SELECT * FROM (
-    SELECT *,
-    row_number() OVER (
-        PARTITION BY 
-            datasource_num_id, 
-            invoice_no, 
-            order_number, 
-            branch_id, 
-            COALESCE(CAST(invoice_line_no AS STRING), concat(CAST(sales_amount AS STRING), CAST(quantity AS STRING)))
-        ORDER BY updated_ts DESC
-    ) AS row_num
-    FROM (
-        SELECT
-            datasource_num_id, 
-            TRIM(branch_id) AS branch_id, 
-            to_date(date_invoice) AS date_invoice, 
-            sales_amount, 
-            currency, 
-            customer_dim_key,
-            TRIM(invoice_no) AS invoice_no, 
-            TRIM(wesnet_order_no) AS wesnet_order_no, 
-            TRIM(order_number) AS order_number, 
-            order_integration_id, 
-            accounting_include_flag,
-            sales_transfer_flag, 
-            kit_component_flag, 
-            TRIM(sim_description) AS sim_description, 
-            TRIM(inventory_org_code) AS inventory_org_code,
-            cost_amount, 
-            quantity, 
-            market_cost, 
-            TRIM(transaction_type) AS transaction_type, 
-            invoice_line_no, 
-            conversion_rate,
-            budget_conversion_rate, 
-            TRIM(flex_1) AS flex_1, 
-            dl_load_date, 
-            updated_ts
-        FROM brz_teradata.udm_sales_fact 
-        WHERE dl_load_date > '{min_cdc_value}'
-    )
-)
-WHERE row_num = 1
-""")
-
-
-
-
-
-
-# COMMAND ----------
-spark.sql(f"""
-CREATE OR REPLACE TEMPORARY VIEW of_order_fact AS
-SELECT * FROM (
-    SELECT *,
-    row_number() OVER (
-        PARTITION BY datasource_num_id, sales_order_no, branch_id, order_integration_id, flex_1, ent_type, invoice_no
-        ORDER BY order_updated_ts DESC
-    ) AS row_num
-    FROM (
-        SELECT
-            datasource_num_id, 
-            TRIM(sales_order_no) AS sales_order_no, 
-            TRIM(branch_id) AS branch_id, 
-            order_integration_id, 
-            TRIM(flex_1) AS flex_1,
-            TRIM(ent_type) AS ent_type, 
-            TRIM(invoice_no) AS invoice_no, 
-            to_date(date_invoice) AS date_invoice, 
-            WesnetLine, 
-            dl_load_date, 
-            order_updated_ts,
-            TRIM(customer_po_no) AS customer_po_no
-        FROM brz_teradata.udm_order_fact
-        WHERE dl_load_date > '{min_cdc_value}'
-    )
-)
-WHERE row_num = 1
-""")
-
-
-
-
-
-# COMMAND ----------
-spark.sql(f"""
-CREATE OR REPLACE TEMPORARY VIEW dim_digital_channel AS
-SELECT DISTINCT 
-    TRIM(ent_type) AS ent_type, 
+SELECT 
     datasource_num_id, 
-    TRIM(rollup_category) AS rollup_category
-FROM brz_teradata.udm_digital_channel_code_dim
-""")
+    branch_id, 
+    date_invoice, 
+    invoice_no, 
+    order_number,
+    LENGTH(branch_id) AS len_branch,
+    LENGTH(invoice_no) AS len_invoice,
+    LENGTH(order_number) AS len_order
+FROM brz_teradata.udm_sales_fact
+WHERE invoice_no = '24F206518' 
+  AND datasource_num_id = 12004;
+
+
+
+
+
+SELECT 
+    datasource_num_id, 
+    branch_id, 
+    date_invoice, 
+    invoice_no, 
+    sales_order_no,
+    ent_type,
+    LENGTH(branch_id) AS len_branch,
+    LENGTH(invoice_no) AS len_invoice,
+    LENGTH(sales_order_no) AS len_order
+FROM brz_teradata.udm_order_fact
+WHERE sales_order_no = '24FB24GP' 
+  AND datasource_num_id = 12004;
+
+
+
+
+
+SELECT 
+    sf.invoice_no AS sf_invoice,
+    uof.invoice_no AS uof_invoice,
+    sf.date_invoice AS sf_date,
+    uof.date_invoice AS uof_date,
+    sf.branch_id AS sf_branch,
+    uof.branch_id AS uof_branch,
+    uof.ent_type
+FROM brz_teradata.udm_sales_fact sf
+LEFT JOIN brz_teradata.udm_order_fact uof 
+    ON sf.datasource_num_id = uof.datasource_num_id
+    AND sf.order_number = uof.sales_order_no
+WHERE sf.invoice_no = '24F206518' 
+  AND sf.datasource_num_id = 12004;
+
+
+
+
+
