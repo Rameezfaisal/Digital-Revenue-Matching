@@ -1,17 +1,10 @@
-i ran this in teradata
-
-select * from dss_marts.digital_dashboard_control where invoice_no = '24F206518'
-
-this is the output
-
-	datasource_num_id	sbu	ent_type	rollup_category	date_invoice	total_no_of_sales	sales_amount	currency	data_source_name	cust_name	invoice_no	order_number	currency_conversion	sales_amount_USD	CREATE_DATE
-1	12,004	CSS	EDI Sales	Integrations	8/26/2022	1	692.25	USD	Anixter-Mainframe	054296_JOHNSON CONTROLS SECURITY SOL 	24F206518	24FB24GP	1.0000000000	692.250000000000	7/10/2025
-
-
-
-i ran the same in databricks
-select * from gld_eudm.digital_dashboard_control where invoice_no = '24F206518'
-
-this is the output
-datasource_num_id	sbu	ent_type	rollup_category	date_invoice	total_no_of_sales	sales_amount	currency	data_source_name	cust_name	invoice_no	order_number	currency_conversion	sales_amount_USD	CREATE_DATE	dl_load_ts	dl_updated_ts
-12004	CSS	null	null	2022-08-26	1	692.25	USD	Anixter-Mainframe	054296_JOHNSON CONTROLS SECURITY SOL 	24F206518	24FB24GP	1.000000	692.25	2026-08-17	2026-08-17T08:21:24.128+00:00	2026-08-17T08:21:24.128+00:00
+SELECT 
+    datasource_num_id, 
+    branch_id, 
+    date_invoice, 
+    invoice_no, 
+    sales_order_no,
+    ent_type,
+    LENGTH(sales_order_no) as actual_length
+FROM brz_teradata.udm_order_fact
+WHERE sales_order_no LIKE '%24FB24GP%';
