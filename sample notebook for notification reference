@@ -1,0 +1,708 @@
+# Databricks notebook source
+# MAGIC %pip install tabulate
+
+# COMMAND ----------
+
+# DBTITLE 1,env config
+# MAGIC %run /Workspace/DE-Transformation/utilities/environment_configuration
+
+# COMMAND ----------
+
+# DBTITLE 1,parameter_dictionary
+dbutils.widgets.get("parameter_dictionary")
+
+# COMMAND ----------
+
+# DBTITLE 1,explode parameter_dictionary
+# MAGIC %run /Workspace/DE-Foundry/frameworks/transformation/workers/common_utilty_to_explode
+
+# COMMAND ----------
+
+# DBTITLE 1,Define variables
+if adls == "stnpshareddev03":
+    env_val = "DEV"
+    dataFactoryName = "stnpshareddev03"
+    catalog_name="dev_metadata_db"
+    
+elif  adls == "stdatapfsiteastus03":
+    env_val = "SIT" 
+    dataFactoryName = "stdatapfsiteastus03"
+    catalog_name="sit_metadata_db"
+   
+elif adls == "stnpshareduat03":
+    env_val = "UAT"
+    dataFactoryName = "stnpshareduat03"
+    catalog_name="uat_metadata_db"
+    
+elif adls == "stdataplatformmain03":
+    env_val = "PROD"
+    dataFactoryName = "stdataplatformmain03"
+    catalog_name="prod_metadata_db"
+    
+else:
+    print("not valid")
+spark.sql(f"use catalog {catalog_name}")
+print(dataFactoryName)
+print(env_val)
+# print(Adls_Blob_URL)
+
+# COMMAND ----------
+
+# DBTITLE 1,teams report function
+import io, base64
+import pandas as pd
+import matplotlib.pyplot as plt
+import requests
+from datetime import datetime
+import pytz
+
+def teams_job_report(job_status_df, webhook_url, env_val,businessunit):
+    def df_to_png_bytes(df: pd.DataFrame, max_rows=40, max_cols=12, dpi=300) -> bytes:
+        df = df.iloc[:max_rows, :max_cols].copy()
+        fig, ax = plt.subplots(figsize=(min(13, 0.18 * max(3, df.shape[1]) * 12),
+                                        min(15, 0.35 * max(3, df.shape[0]))),
+                               dpi=dpi)
+        ax.axis('off')
+        
+        if businessunit=="GOLD_EUDM":
+            col_widths = [0.07, 0.20, 0.06, 0.24, 0.11]
+        else:
+            col_widths = [0.07, 0.17, 0.07, 0.07, 0.11, 0.09, 0.13, 0.30]
+
+        tbl = ax.table(cellText=df.values,
+                       colLabels=[str(c) for c in df.columns],
+                       colWidths=col_widths,
+                       loc='center',
+                       cellLoc='left',
+                       colLoc='left')
+        tbl.auto_set_font_size(False)
+        tbl.set_fontsize(14)
+        tbl.scale(1.5, 2.2)
+        buf = io.BytesIO()
+        plt.tight_layout()
+        fig.savefig(buf, format='png', bbox_inches='tight', pad_inches=0.2)
+        plt.close(fig)
+        buf.seek(0)
+        return buf.read()
+
+
+    # Query Spark and convert to pandas DataFrame
+    if businessunit=="GOLD_EUDM":
+        status_df = spark.sql(f"""
+        select operation_id,target_table_name,owner,Last_execution_time,STATUS as status
+        from  {job_status_df}""")
+    else:
+        status_df = spark.sql(f"""
+        select job_id, Domain, Owner, Active_Operations as Active, Completed, Pending, Job_Status, Failed_operations 
+        from {job_status_df}""")
+
+    df = status_df.toPandas()
+
+    # Get current time in IST
+    ist = pytz.timezone('Asia/Kolkata')
+    current_time_ist = datetime.now(ist).strftime('%Y-%m-%d %H:%M')
+
+    # Prepare and send the main report as an image
+    png_bytes = df_to_png_bytes(df)
+    b64 = base64.b64encode(png_bytes).decode("utf-8")
+    data_uri = f"data:image/png;base64,{b64}"
+
+    report_payload = {
+        "type": "message",
+        "attachments": [
+            {
+                "contentType": "application/vnd.microsoft.card.adaptive",
+                "content": {
+                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                    "type": "AdaptiveCard",
+                    "version": "1.4",
+                    "body": [
+                        {
+                            "type": "RichTextBlock",
+                            "inlines": [
+                                {"type": "TextRun", "text": "Hi Team,"},
+                                {"type": "TextRun", "text": "\n"},
+                                {"type": "TextRun", "text": f"Please find the {env_val}-{businessunit} load status below : {current_time_ist}"},
+                            ],
+                            "wrap": True
+                        },
+                        {
+                            "type": "Image",
+                            "url": data_uri,
+                            "size": "Stretch"
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+    report_response = requests.post(webhook_url, json=report_payload)
+
+    # Prepare and send the failed operations list
+    if businessunit !="GOLD_EUDM":
+        
+        # Prepare failed operations string
+        failed_ops_lists = df['Failed_operations'].str.split(', ')
+        all_failed_operations = [op for sublist in failed_ops_lists for op in sublist if op]
+        all_failed_operations_str = ', '.join(all_failed_operations)
+
+        if len(all_failed_operations_str) != 0:
+            # send the failed operations list
+            failed_ops_payload = {
+                "type": "message",
+                "attachments": [
+                    {
+                        "contentType": "application/vnd.microsoft.card.adaptive",
+                        "content": {
+                            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                            "type": "AdaptiveCard",
+                            "version": "1.4",
+                            "body": [
+                                {
+                                    "type": "RichTextBlock",
+                                    "inlines": [
+                                        {"type": "TextRun", "text": "Hi Team,"},
+                                        {"type": "TextRun", "text": "\n"},
+                                        {"type": "TextRun", "text": f"Please find the list of Failed Operation in {env_val}-{businessunit} :"},
+                                        {"type": "TextRun", "text": "\n"},
+                                        {"type": "TextRun", "text": f"{all_failed_operations_str}"}
+                                    ],
+                                    "wrap": True
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+            failed_ops_response = requests.post(webhook_url, json=failed_ops_payload)
+
+    # return {
+    #     "report_status_code": report_response.status_code,
+    #     "failed_ops_status_code": failed_ops_response.status_code
+    # }
+
+# COMMAND ----------
+
+# DBTITLE 1,email alert function
+from pyspark.sql import SparkSession
+from pyspark.dbutils import DBUtils
+import json, re, html
+import smtplib, ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import re, json
+
+spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
+dbutils = DBUtils(spark)
+
+def send_email(job_status_df, env_val, success_email_to,businessunit):
+    
+    SMTP_HOST = "smtp.office365.com"
+    SMTP_PORT = 587
+
+    SMTP_USER = dbutils.secrets.get("ddpscopekeyvault001", "kvSvcDDPDatabricksNPUserName")
+    SMTP_PASS = dbutils.secrets.get("ddpscopekeyvault001", "kvSvcDDPDatabricksnp")
+
+    EMAIL_SPLIT = re.compile(r"[;,]")
+
+    def split_emails(val):
+        if isinstance(val, list):
+            parts = val
+        elif isinstance(val, str):
+            parts = EMAIL_SPLIT.split(val)
+        else:
+            parts = []
+        seen, out = set(), []
+        for e in parts:
+            if not isinstance(e, str):
+                continue
+            s = e.strip()
+            if s and s.lower() not in seen:
+                seen.add(s.lower())
+                out.append(s)
+        return out
+
+    recipients = split_emails(f"{success_email_to}")
+    print(recipients)
+
+    wesco_spark_df = spark.sql(f"select * from {job_status_df}")
+    wesco_df = wesco_spark_df.toPandas()
+    html_table = wesco_df.to_html(index=False, border=1)
+
+    body_html = f"""<html><body><p>Hi Team,<br>Please find the {env_val} load status below:</p>{html_table}</body></html>""".strip()
+
+    subject = f"{env_val}-{businessunit} JOB RUN STATUS REPORT:{datetime.now().strftime('%Y-%m-%d')}"
+
+    to_list = recipients
+    from_addr = SMTP_USER
+
+    msg = MIMEMultipart("alternative")
+    msg["From"] = from_addr
+    msg["To"] = ", ".join(to_list)
+    msg["Subject"] = subject
+
+    msg.attach(MIMEText(body_html, "html"))
+
+    ctx = ssl.create_default_context()
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as s:
+        print("[SMTP] EHLO 1:", s.ehlo())
+        print("[SMTP] STARTTLS:", s.starttls(context=ctx))
+        print("[SMTP] EHLO 2:", s.ehlo())
+        print("[SMTP] AUTH LOGIN…")
+        s.login(SMTP_USER, SMTP_PASS)
+        s.sendmail(msg["From"], recipients, msg.as_string())
+
+    print("Email sent via SMTP:", subject)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ###Silver Load status (WESCO)
+
+# COMMAND ----------
+
+# DBTITLE 1,WESCO Monitoring Query
+# MAGIC %sql
+# MAGIC create or replace TEMPORARY VIEW wesco_job_status as
+# MAGIC WITH WESCO_DomainMapping AS (
+# MAGIC SELECT 2000 AS job_id, 'SO & Shipment' AS Domain, 'FO' AS Owner UNION ALL
+# MAGIC SELECT 2001 AS job_id, 'SO & Shipment' AS Domain, 'FO' AS Owner UNION ALL
+# MAGIC SELECT 2002 AS job_id, 'SO & Shipment' AS Domain, 'FO' AS Owner UNION ALL
+# MAGIC SELECT 2003 AS job_id, 'Customer' AS Domain, 'FO' AS Owner UNION ALL
+# MAGIC SELECT 2005 AS job_id, 'Inventory' AS Domain, 'MO' AS Owner UNION ALL
+# MAGIC SELECT 2006 AS job_id, 'Lead To Quote' AS Domain, 'FO' AS Owner UNION ALL
+# MAGIC SELECT 2007 AS job_id, 'Location' AS Domain, 'FO' AS Owner UNION ALL
+# MAGIC SELECT 2020 AS job_id, 'AR' AS Domain, 'BO' AS Owner UNION ALL
+# MAGIC SELECT 2021 AS job_id, 'GL' AS Domain, 'BO' AS Owner UNION ALL
+# MAGIC SELECT 2023 AS job_id, 'Sales Invoice' AS Domain, 'BO' AS Owner UNION ALL
+# MAGIC SELECT 2025 AS job_id, 'Supplier' AS Domain, 'MO' AS Owner UNION ALL
+# MAGIC SELECT 2026 AS job_id, 'PR' AS Domain, 'MO' AS Owner UNION ALL
+# MAGIC SELECT 2027 AS job_id, 'PO' AS Domain, 'MO' AS Owner UNION ALL
+# MAGIC SELECT 2028 AS job_id, 'PRR' AS Domain, 'MO' AS Owner UNION ALL
+# MAGIC SELECT 2050 AS job_id, 'Product' AS Domain, 'BO' AS Owner UNION ALL
+# MAGIC SELECT 2040 AS job_id, 'EDI' AS Domain, 'MO' AS Owner UNION ALL
+# MAGIC SELECT 41 AS job_id, 'AP' AS Domain, 'BO' AS Owner UNION ALL 
+# MAGIC SELECT 4000 AS job_id, 'Pricecost' AS Domain, 'FO' AS Owner UNION ALL 
+# MAGIC SELECT 2500 AS job_id, 'Reference' AS Domain, 'BO' AS Owner UNION ALL
+# MAGIC SELECT 2019 AS job_id, 'dispute' AS Domain, 'BO' As Owner UNION ALL
+# MAGIC SELECT 8002 AS job_id, 'lucid' as Domain, 'FO' as Owner UNION ALL
+# MAGIC SELECT 8001 AS job_id, 'lucid' as Domain, 'FO' as Owner UNION ALL
+# MAGIC SELECT 8011 AS job_id, 'CMT' as Domain, 'FO' as Owner UNION ALL 
+# MAGIC SELECT 8012 AS job_id, 'CMT' as Domain, 'FO' as Owner UNION ALL 
+# MAGIC SELECT 2044 AS job_id, 'Program & Project' as Domain, 'FO' as Owner UNION ALL
+# MAGIC SELECT 2045 AS job_id, 'Work Order' as Domain, 'MO' as Owner UNION ALL
+# MAGIC SELECT 4010 AS job_id, 'Shipment Notice' as Domain, 'MO' as Owner UNION ALL 
+# MAGIC SELECT 2024 AS job_id, 'Supplier 360' as Domain, 'MO' as Owner UNION ALL
+# MAGIC SELECT 494 AS job_id, 'Mulesoft' as Domain, 'OMNI' as Owner UNION ALL 
+# MAGIC SELECT 492 AS job_id, 'Mulesoft' as Domain, 'OMNI' as Owner UNION ALL 
+# MAGIC SELECT 495 AS job_id, 'Mulesoft' as Domain, 'OMNI' as Owner UNION ALL 
+# MAGIC SELECT 2070 AS job_id, 'Wirexpress' as Domain, 'OMNI' as Owner UNION ALL 
+# MAGIC SELECT 2090 AS job_id, 'Housekeeping' as Domain, 'OMNI' as Owner UNION ALL 
+# MAGIC SELECT 2091 AS job_id, 'NounToolhusekeeping' as Domain, 'OMNI' as Owner UNION ALL 
+# MAGIC SELECT 2075 AS job_id, 'PowerBI' as Domain, 'OMNI' as Owner 
+# MAGIC ),
+# MAGIC Operations AS (
+# MAGIC SELECT tc.job_id, dm.Domain, dm.Owner, Count(tc.operation_id) as Active_Operations
+# MAGIC From config.transformation_config tc
+# MAGIC inner join WESCO_DomainMapping dm ON tc.job_id = dm.job_id
+# MAGIC where tc.is_operation_active = 1
+# MAGIC GROUP BY tc.job_id, dm.Domain, dm.Owner
+# MAGIC ),
+# MAGIC --Expected pipeline start time
+# MAGIC pipeline_start_time AS (
+# MAGIC     SELECT dm.job_id,
+# MAGIC         case when  min(sh.calendar_scheduled_time_est)  is null or min(sh.calendar_scheduled_time_est) = 'dependent' then substr(min(last_triggered_time_est),12,5)
+# MAGIC         else  min(sh.calendar_scheduled_time_est) 
+# MAGIC     end  as calendar_scheduled_time_est 
+# MAGIC     FROM config.scheduling_dependency_table sh
+# MAGIC     JOIN WESCO_DomainMapping dm ON sh.job_id = dm.job_id
+# MAGIC     GROUP BY dm.job_id
+# MAGIC ),
+# MAGIC
+# MAGIC --Expected pipeline end time
+# MAGIC pipeline_end_time AS (
+# MAGIC     SELECT js.job_id, substr(max(pipeline_end_time),12,8) as expected_pipeline_end_time
+# MAGIC     FROM audit.job_audit_summary js
+# MAGIC     JOIN config.scheduling_dependency_table sh on js.job_id=sh.job_id and sh.last_pipeline_run_id=js.pipeline_run_id
+# MAGIC     GROUP BY js.job_id
+# MAGIC ),
+# MAGIC
+# MAGIC AuditStats AS(
+# MAGIC SELECT
+# MAGIC         s.job_id,
+# MAGIC         s.calendar_scheduled_time_est as pipeline_scheduled_time,
+# MAGIC         e.expected_pipeline_end_time as estimated_pipeline_end_time
+# MAGIC     FROM pipeline_start_time s
+# MAGIC     JOIN pipeline_end_time e ON s.job_id = e.job_id
+# MAGIC ),
+# MAGIC --Acture start and end time of pipeline
+# MAGIC TodayStats AS ( 
+# MAGIC SELECT 
+# MAGIC     jad.job_id,
+# MAGIC     date_format(MIN(activity_start_time),'HH:mm:ss') AS Actual_Start_Time,
+# MAGIC     date_format(MAX(activity_end_time),'HH:mm:ss') AS Actual_End_Time
+# MAGIC
+# MAGIC FROM audit.job_audit_detail jad
+# MAGIC INNER JOIN WESCO_DomainMapping dm ON jad.job_id = dm.job_id
+# MAGIC WHERE activity_start_time >= CONCAT(DATE_ADD(current_date(), -1), ' 20:00:00')
+# MAGIC GROUP BY jad.job_id
+# MAGIC ),
+# MAGIC Latest_Operation AS (
+# MAGIC SELECT job_id, Domain, Owner, Active_Operations, operation_id, is_failed FROM (SELECT dt.job_id, op.Domain, op.Owner, op.Active_Operations, dt.operation_id, dt.is_failed, 
+# MAGIC ROW_NUMBER() OVER(PARTITION BY dt.operation_id ORDER BY dt.activity_start_time DESC) AS rn 
+# MAGIC FROM Operations op LEFT JOIN audit.job_audit_detail dt ON dt.job_id = op.job_id 
+# MAGIC WHERE dt.activity_start_time  >= CONCAT(DATE_ADD(current_date(), -1),' 20:00:00')) AS t
+# MAGIC WHERE rn=1
+# MAGIC ),
+# MAGIC Latest__failed_Operation AS (
+# MAGIC SELECT job_id, Domain, Owner, Active_Operations, operation_id, is_failed FROM (SELECT dt.job_id, op.Domain, op.Owner, op.Active_Operations, dt.operation_id, dt.is_failed, 
+# MAGIC ROW_NUMBER() OVER(PARTITION BY dt.operation_id ORDER BY dt.activity_start_time DESC) AS rn 
+# MAGIC FROM Operations op LEFT JOIN audit.job_audit_detail dt ON dt.job_id = op.job_id ) AS t
+# MAGIC WHERE rn=1
+# MAGIC ),
+# MAGIC CompleteStatus AS (
+# MAGIC SELECT job_id, Domain, Owner, Active_Operations, Completed, (Active_Operations - Completed) AS Pending, 
+# MAGIC CASE WHEN Active_Operations = Completed THEN 'Completed' ELSE 'In-Progress' END AS Job_Status FROM
+# MAGIC (SELECT op.job_id, op.Domain, op.Owner, op.Active_Operations, Count(lop.operation_id) AS Completed
+# MAGIC FROM Operations op INNER JOIN Latest_Operation lop ON op.job_id = lop.job_id 
+# MAGIC WHERE is_failed = 0 
+# MAGIC GROUP BY op.job_id, op.Domain, op.Owner, op.Active_Operations) AS t
+# MAGIC ),
+# MAGIC AllCompleteStatus AS (
+# MAGIC SELECT op.job_id, op.Domain, op.Owner, op.Active_Operations, COALESCE(lop.Completed, 0) AS Completed, COALESCE(lop.Pending,op.Active_Operations) AS Pending, COALESCE(lop.Job_Status,'Not Started') AS Job_Status, ASt.pipeline_scheduled_time, ASt.estimated_pipeline_end_time, TS.actual_start_time, TS.actual_end_time
+# MAGIC FROM Operations op LEFT JOIN CompleteStatus lop on op.job_id = lop.job_id
+# MAGIC left join AuditStats ASt on op.job_id = ASt.job_id
+# MAGIC left join TodayStats TS ON op.job_id = TS.job_id
+# MAGIC ),
+# MAGIC FailureComment AS (
+# MAGIC SELECT job_id, STRING_AGG(operation_id,', ') AS Failed_operations FROM Latest__failed_Operation WHERE is_failed=1 AND operation_id IN (SELECT tc.operation_id
+# MAGIC From config.transformation_config tc
+# MAGIC left join WESCO_DomainMapping dm ON tc.job_id = dm.job_id
+# MAGIC where tc.is_operation_active = 1) GROUP BY job_id
+# MAGIC )
+# MAGIC SELECT CS.job_id, Domain, Owner, Active_Operations, Completed, Pending, Job_Status, pipeline_scheduled_time, estimated_pipeline_end_time, CASE WHEN Job_Status='Not Started' then "Yet to Start" ELSE actual_start_time end as actual_pipeline_start_time, Case when Job_Status='In-Progress' then "Yet to complete" ELSE actual_end_time end as actual_pipeline_end_time, COALESCE(Failed_operations,'') AS Failed_operations FROM AllCompleteStatus CS FULL OUTER JOIN FailureComment FC ON CS.job_id = FC.job_id ORDER BY CS.Owner,CS.job_id
+
+# COMMAND ----------
+
+# DBTITLE 1,Wesco job run status report
+job_status_df='wesco_job_status'
+businessunit='WESCO'
+success_email_to=email_to
+webhook_url = webhook_url
+teams_job_report(job_status_df,webhook_url,env_val,businessunit)
+if email_flag =='Y':
+    send_email(job_status_df,env_val,success_email_to,businessunit)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ###Silver Load status (ATC)
+
+# COMMAND ----------
+
+# DBTITLE 1,ATC  Monitoring Query
+# MAGIC %sql
+# MAGIC create or replace TEMPORARY VIEW atc_job_status as
+# MAGIC WITH ATC_DomainMapping AS (
+# MAGIC SELECT 6000 AS job_id, 'SO & Shipment' AS Domain, 'FO' AS Owner UNION ALL
+# MAGIC SELECT 6001 AS job_id, 'SO & Shipment' AS Domain, 'FO' AS Owner UNION ALL
+# MAGIC SELECT 6002 AS job_id, 'SO & Shipment' AS Domain, 'FO' AS Owner UNION ALL
+# MAGIC SELECT 6003 AS job_id, 'Customer' AS Domain, 'FO' AS Owner UNION ALL
+# MAGIC SELECT 6005 AS job_id, 'Inventory' AS Domain, 'MO' AS Owner UNION ALL
+# MAGIC SELECT 6006 AS job_id, 'Lead To Quote' AS Domain, 'FO' AS Owner UNION ALL
+# MAGIC SELECT 6007 AS job_id, 'Location' AS Domain, 'FO' AS Owner UNION ALL
+# MAGIC SELECT 6020 AS job_id, 'AR' AS Domain, 'BO' AS Owner UNION ALL
+# MAGIC SELECT 6021 AS job_id, 'GL' AS Domain, 'BO' AS Owner UNION ALL
+# MAGIC SELECT 6023 AS job_id, 'Sales Invoice' AS Domain, 'BO' AS Owner UNION ALL
+# MAGIC SELECT 6025 AS job_id, 'Supplier' AS Domain, 'MO' AS Owner UNION ALL
+# MAGIC SELECT 6026 AS job_id, 'PR' AS Domain, 'MO' AS Owner UNION ALL
+# MAGIC SELECT 6027 AS job_id, 'PO' AS Domain, 'MO' AS Owner UNION ALL
+# MAGIC SELECT 6028 AS job_id, 'PRR' AS Domain, 'MO' AS Owner UNION ALL
+# MAGIC SELECT 6041 AS job_id, 'AP' AS Domain, 'BO' AS Owner UNION ALL
+# MAGIC SELECT 6050 AS job_id, 'Product' AS Domain, 'BO' AS Owner UNION ALL
+# MAGIC SELECT 6040 AS job_id, 'EDI' AS Domain, 'MO' AS Owner UNION ALL
+# MAGIC SELECT 6400 AS job_id, 'Pricecost' AS Domain, 'FO' AS Owner UNION ALL 
+# MAGIC SELECT 6500 AS job_id, 'Reference' AS Domain, 'BO' AS Owner UNION ALL
+# MAGIC SELECT 6019 AS job_id, 'disputes' as Domain, 'BO' as Owner UNION ALL
+# MAGIC SELECT 6801 AS job_id, 'lucid' as Domain, 'FO' as Owner UNION ALL
+# MAGIC SELECT 6802 AS job_id, 'lucid' as Domain, 'FO' as Owner UNION ALL
+# MAGIC SELECT 9011 AS job_id, 'CMT' as Domain, 'FO' as Owner UNION ALL 
+# MAGIC SELECT 9012 AS job_id, 'CMT' as Domain, 'FO' as Owner UNION ALL 
+# MAGIC SELECT 6044 AS job_id, 'Program & Project' as Domain, 'FO' as Owner UNION ALL
+# MAGIC SELECT 6045 AS job_id, 'Work Order' as Domain, 'MO' as Owner UNION ALL
+# MAGIC SELECT 5010 AS job_id, 'Shipment Notice' as Domain, 'MO' as Owner UNION ALL 
+# MAGIC SELECT 6024 AS job_id, 'Supplier 360' as Domain, 'MO' as Owner UNION ALL
+# MAGIC SELECT 692 AS job_id, 'Mulesoft' as Domain, 'OMNI' as Owner UNION ALL 
+# MAGIC SELECT 694 AS job_id, 'Mulesoft' as Domain, 'OMNI' as Owner UNION ALL 
+# MAGIC SELECT 695 AS job_id, 'Mulesoft' as Domain, 'OMNI' as Owner UNION ALL 
+# MAGIC SELECT 2095 AS job_id, 'ATC_Legacy' as Domain, 'OMNI' as Owner UNION ALL 
+# MAGIC SELECT 2096 AS job_id, 'ATC_DDP' as Domain, 'OMNI' as Owner
+# MAGIC ),
+# MAGIC Operations AS (
+# MAGIC SELECT tc.job_id, dm.Domain, dm.Owner, Count(tc.operation_id) as Active_Operations
+# MAGIC From config.transformation_config tc
+# MAGIC inner join ATC_DomainMapping dm ON tc.job_id = dm.job_id
+# MAGIC where tc.is_operation_active = 1
+# MAGIC GROUP BY tc.job_id, dm.Domain, dm.Owner
+# MAGIC ),
+# MAGIC --Expected pipeline start time
+# MAGIC pipeline_start_time AS (
+# MAGIC     SELECT dm.job_id,
+# MAGIC         case when  min(sh.calendar_scheduled_time_est)  is null or min(sh.calendar_scheduled_time_est) = 'dependent' then substr(min(last_triggered_time_est),12,5)
+# MAGIC         else  min(sh.calendar_scheduled_time_est) 
+# MAGIC     end  as calendar_scheduled_time_est 
+# MAGIC     FROM config.scheduling_dependency_table sh
+# MAGIC     JOIN ATC_DomainMapping dm ON sh.job_id = dm.job_id
+# MAGIC     GROUP BY dm.job_id
+# MAGIC ),
+# MAGIC
+# MAGIC --Expected pipeline end time
+# MAGIC pipeline_end_time AS (
+# MAGIC     SELECT js.job_id, substr(max(pipeline_end_time),12,8) as expected_pipeline_end_time
+# MAGIC     FROM audit.job_audit_summary js
+# MAGIC     JOIN config.scheduling_dependency_table sh on js.job_id=sh.job_id and sh.last_pipeline_run_id=js.pipeline_run_id
+# MAGIC     GROUP BY js.job_id
+# MAGIC ),
+# MAGIC
+# MAGIC AuditStats AS(
+# MAGIC SELECT
+# MAGIC         s.job_id,
+# MAGIC         s.calendar_scheduled_time_est as pipeline_scheduled_time,
+# MAGIC         e.expected_pipeline_end_time as estimated_pipeline_end_time
+# MAGIC     FROM pipeline_start_time s
+# MAGIC     JOIN pipeline_end_time e ON s.job_id = e.job_id
+# MAGIC ),
+# MAGIC --Acture start and end time of pipeline
+# MAGIC TodayStats AS ( 
+# MAGIC SELECT 
+# MAGIC     jad.job_id,
+# MAGIC     date_format(MIN(activity_start_time),'HH:mm:ss') AS Actual_Start_Time,
+# MAGIC     date_format(MAX(activity_end_time),'HH:mm:ss') AS Actual_End_Time
+# MAGIC
+# MAGIC FROM audit.job_audit_detail jad
+# MAGIC INNER JOIN ATC_DomainMapping dm ON jad.job_id = dm.job_id
+# MAGIC WHERE activity_start_time >= CONCAT(DATE_ADD(current_date(), -1), ' 20:00:00')
+# MAGIC GROUP BY jad.job_id
+# MAGIC ),
+# MAGIC Latest_Operation AS (
+# MAGIC SELECT job_id, Domain, Owner, Active_Operations, operation_id, is_failed FROM (SELECT dt.job_id, op.Domain, op.Owner, op.Active_Operations, dt.operation_id, dt.is_failed, 
+# MAGIC ROW_NUMBER() OVER(PARTITION BY dt.operation_id ORDER BY dt.activity_start_time DESC) AS rn 
+# MAGIC FROM Operations op LEFT JOIN audit.job_audit_detail dt ON dt.job_id = op.job_id 
+# MAGIC WHERE dt.activity_start_time  >= CONCAT(DATE_ADD(current_date(), -1),' 20:00:00')) AS t
+# MAGIC WHERE rn=1
+# MAGIC ),
+# MAGIC Latest__failed_Operation AS (
+# MAGIC SELECT job_id, Domain, Owner, Active_Operations, operation_id, is_failed FROM (SELECT dt.job_id, op.Domain, op.Owner, op.Active_Operations, dt.operation_id, dt.is_failed, 
+# MAGIC ROW_NUMBER() OVER(PARTITION BY dt.operation_id ORDER BY dt.activity_start_time DESC) AS rn 
+# MAGIC FROM Operations op LEFT JOIN audit.job_audit_detail dt ON dt.job_id = op.job_id ) AS t
+# MAGIC WHERE rn=1
+# MAGIC ),
+# MAGIC CompleteStatus AS (
+# MAGIC SELECT job_id, Domain, Owner, Active_Operations, Completed, (Active_Operations - Completed) AS Pending, 
+# MAGIC CASE WHEN Active_Operations = Completed THEN 'Completed' ELSE 'In-Progress' END AS Job_Status FROM
+# MAGIC (SELECT op.job_id, op.Domain, op.Owner, op.Active_Operations, Count(lop.operation_id) AS Completed
+# MAGIC FROM Operations op INNER JOIN Latest_Operation lop ON op.job_id = lop.job_id 
+# MAGIC WHERE is_failed = 0 
+# MAGIC GROUP BY op.job_id, op.Domain, op.Owner, op.Active_Operations) AS t
+# MAGIC ),
+# MAGIC AllCompleteStatus AS (
+# MAGIC SELECT op.job_id, op.Domain, op.Owner, op.Active_Operations, COALESCE(lop.Completed, 0) AS Completed, COALESCE(lop.Pending,op.Active_Operations) AS Pending, COALESCE(lop.Job_Status,'Not Started') AS Job_Status, ASt.pipeline_scheduled_time, ASt.estimated_pipeline_end_time, TS.actual_start_time, TS.actual_end_time
+# MAGIC FROM Operations op LEFT JOIN CompleteStatus lop on op.job_id = lop.job_id
+# MAGIC left join AuditStats ASt on op.job_id = ASt.job_id
+# MAGIC left join TodayStats TS ON op.job_id = TS.job_id
+# MAGIC ),
+# MAGIC FailureComment AS (
+# MAGIC SELECT job_id, STRING_AGG(operation_id,', ') AS Failed_operations FROM Latest__failed_Operation WHERE is_failed=1 AND operation_id IN (SELECT tc.operation_id
+# MAGIC From config.transformation_config tc
+# MAGIC left join ATC_DomainMapping dm ON tc.job_id = dm.job_id
+# MAGIC where tc.is_operation_active = 1) GROUP BY job_id
+# MAGIC )
+# MAGIC SELECT CS.job_id, Domain, Owner, Active_Operations, Completed, Pending, Job_Status, pipeline_scheduled_time, estimated_pipeline_end_time, CASE WHEN Job_Status='Not Started' then "Yet to Start" ELSE actual_start_time end as actual_pipeline_start_time, Case when Job_Status='In-Progress' then "Yet to complete" ELSE actual_end_time end as actual_pipeline_end_time, COALESCE(Failed_operations,'') AS Failed_operations FROM AllCompleteStatus CS FULL OUTER JOIN FailureComment FC ON CS.job_id = FC.job_id ORDER BY CS.Owner,CS.job_id
+
+# COMMAND ----------
+
+# DBTITLE 1,ATC job run status report
+job_status_df='atc_job_status'
+success_email_to=email_to
+businessunit='ATC'
+webhook_url = webhook_url
+teams_job_report(job_status_df,webhook_url,env_val,businessunit)
+if email_flag =='Y':
+    send_email(job_status_df,env_val,success_email_to,businessunit)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ###EUDM Load status (DDP)
+
+# COMMAND ----------
+
+# DBTITLE 1,EUDM monitoring query
+# MAGIC %sql
+# MAGIC create or replace TEMPORARY VIEW GOLD_EUDM_LIST as
+# MAGIC WITH GOLD_EUDM_LIST AS (
+# MAGIC   SELECT 2080 AS job_id, 20804 AS operation_id, 'MO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 20806 AS operation_id, 'MO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 20807 AS operation_id, 'BO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 2080558 AS operation_id, 'BO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 2080566 AS operation_id, 'BO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 20805 AS operation_id, 'FO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 2080555 AS operation_id, 'FO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 2080561 AS operation_id, 'FO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 2080562 AS operation_id, 'FO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 2080563 AS operation_id, 'FO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 20809 AS operation_id, 'BO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 208010 AS operation_id, 'MO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 208011 AS operation_id, 'MO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 208012 AS operation_id, 'FO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 20801 AS operation_id, 'MO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 20808 AS operation_id, 'FO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 208013 AS operation_id, 'MO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 208028 AS operation_id, 'FO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 20802 AS operation_id, 'BO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 20803 AS operation_id, 'MO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 208014 AS operation_id, 'MO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 2080559 AS operation_id, 'BO' AS Owner UNION ALL
+# MAGIC   SELECT 2080 AS job_id, 2080560 AS operation_id, 'BO' AS Owner union ALL
+# MAGIC   SELECT 6080 AS job_id, 60804 AS operation_id, 'MO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 60806 AS operation_id, 'MO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 60807 AS operation_id, 'BO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 6080558 AS operation_id, 'BO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 6080566 AS operation_id, 'BO' AS Owner UNION ALL
+# MAGIC   SELECT 6083 AS job_id, 60835 AS operation_id, 'FO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 6080555 AS operation_id, 'FO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 6080561 AS operation_id, 'FO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 6080562 AS operation_id, 'FO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 6080563 AS operation_id, 'FO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 60809 AS operation_id, 'BO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 608010 AS operation_id, 'MO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 608011 AS operation_id, 'MO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 608012 AS operation_id, 'FO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 60801 AS operation_id, 'MO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 60808 AS operation_id, 'FO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 608013 AS operation_id, 'MO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 608028 AS operation_id, 'FO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 60802 AS operation_id, 'BO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 60803 AS operation_id, 'MO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 608014 AS operation_id, 'MO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 6080559 AS operation_id, 'BO' AS Owner UNION ALL
+# MAGIC   SELECT 6080 AS job_id, 6080560 AS operation_id, 'BO' AS Owner
+# MAGIC ),
+# MAGIC execution_timings AS (
+# MAGIC   SELECT *
+# MAGIC   FROM (
+# MAGIC     SELECT
+# MAGIC       op.job_id,
+# MAGIC       op.operation_id,
+# MAGIC       op.target_table_name,
+# MAGIC       op.Owner,
+# MAGIC       dt.activity_end_time,
+# MAGIC       dt.is_failed,
+# MAGIC       dt.activity_start_time,
+# MAGIC       ROW_NUMBER() OVER (PARTITION BY dt.operation_id ORDER BY dt.activity_start_time DESC) AS rn
+# MAGIC     FROM (
+# MAGIC       SELECT tc.job_id, dm.operation_id, dm.Owner, tc.target_table_name
+# MAGIC       FROM config.transformation_config tc
+# MAGIC       INNER JOIN GOLD_EUDM_LIST dm
+# MAGIC         ON tc.job_id = dm.job_id
+# MAGIC        AND tc.operation_id = dm.operation_id
+# MAGIC     ) op
+# MAGIC     LEFT JOIN audit.job_audit_detail dt
+# MAGIC       ON dt.job_id = op.job_id
+# MAGIC      AND dt.operation_id = op.operation_id
+# MAGIC   ) t
+# MAGIC   WHERE rn = 1
+# MAGIC ),
+# MAGIC Ops_status AS (
+# MAGIC   SELECT DISTINCT
+# MAGIC     et.operation_id,
+# MAGIC     et.target_table_name,
+# MAGIC     et.owner,
+# MAGIC     et.activity_end_time AS Last_execution_time,
+# MAGIC     CASE
+# MAGIC       WHEN is_failed = 1 THEN 'Failed'
+# MAGIC       WHEN activity_start_time >= (to_timestamp(date_add(current_date(), -1)) + INTERVAL 20 HOURS) THEN 'Success'
+# MAGIC       ELSE 'Not Triggered'
+# MAGIC     END AS STATUS,
+# MAGIC     sdt.run_type
+# MAGIC   FROM execution_timings et
+# MAGIC   LEFT JOIN config.scheduling_dependency_table sdt
+# MAGIC     ON et.operation_id = sdt.operation_id
+# MAGIC    AND et.job_id = sdt.job_id
+# MAGIC ),
+# MAGIC
+# MAGIC Dependency_ops AS (
+# MAGIC   SELECT
+# MAGIC     t.job_id,
+# MAGIC     t.operation_id,
+# MAGIC     trim(dep) AS dependency
+# MAGIC   FROM config.scheduling_dependency_table t
+# MAGIC   LATERAL VIEW explode(split(coalesce(t.dependency_operation_id, ''), ',')) s AS dep
+# MAGIC   WHERE t.operation_id IN (SELECT operation_id FROM Ops_status WHERE STATUS <> 'Success')
+# MAGIC     AND t.run_type <> 'scheduled'
+# MAGIC     AND trim(coalesce(dep, '')) <> ''        -- avoid empty tokens
+# MAGIC ),
+# MAGIC
+# MAGIC -- For each dependency, look at ONLY its latest audit record and keep unmet ones
+# MAGIC Dependency_check AS (
+# MAGIC   WITH latest_dep_runs AS (
+# MAGIC     SELECT
+# MAGIC       dt.operation_id,
+# MAGIC       dt.activity_start_time,
+# MAGIC       dt.is_failed,
+# MAGIC       ROW_NUMBER() OVER (
+# MAGIC         PARTITION BY dt.operation_id
+# MAGIC         ORDER BY dt.activity_start_time DESC
+# MAGIC       ) AS rn
+# MAGIC     FROM audit.job_audit_detail dt
+# MAGIC   )
+# MAGIC   SELECT
+# MAGIC     do.operation_id,
+# MAGIC     concat_ws(
+# MAGIC       ', ',
+# MAGIC       sort_array(collect_set(do.dependency))
+# MAGIC     ) AS Dep_not_met_ops
+# MAGIC   FROM Dependency_ops do
+# MAGIC   LEFT JOIN latest_dep_runs ldr
+# MAGIC     ON CAST(do.dependency AS INT) = ldr.operation_id
+# MAGIC    AND ldr.rn = 1
+# MAGIC   -- Classify whether the dependency is met based on its latest run only
+# MAGIC   -- Keep only those not met
+# MAGIC   WHERE CASE
+# MAGIC           WHEN ldr.is_failed = 1 THEN 'Failed'
+# MAGIC           WHEN ldr.is_failed = 0
+# MAGIC                AND ldr.activity_start_time >= (to_timestamp(date_add(current_date(), -1)) + INTERVAL 20 HOURS)
+# MAGIC             THEN 'Success'
+# MAGIC           ELSE 'Not Triggered'
+# MAGIC         END <> 'Success'
+# MAGIC   GROUP BY do.operation_id
+# MAGIC )
+# MAGIC SELECT
+# MAGIC   os.operation_id,
+# MAGIC   os.target_table_name,
+# MAGIC   os.owner,
+# MAGIC   os.Last_execution_time,
+# MAGIC   os.STATUS,
+# MAGIC   CASE
+# MAGIC     WHEN os.STATUS IN ('Success', 'Failed') THEN 'NA'
+# MAGIC     WHEN dc.Dep_not_met_ops IS NULL AND run_type = 'scheduled' THEN run_type
+# MAGIC     ELSE dc.Dep_not_met_ops
+# MAGIC   END AS dependency_Check
+# MAGIC FROM Ops_status os
+# MAGIC LEFT JOIN Dependency_check dc
+# MAGIC   ON os.operation_id = dc.operation_id
+# MAGIC ORDER BY
+# MAGIC   (CASE WHEN os.owner = 'FO' THEN 1 WHEN os.owner = 'MO' THEN 2 ELSE 3 END),
+# MAGIC   os.operation_id;
+# MAGIC
+
+# COMMAND ----------
+
+# DBTITLE 1,EUDM job run status report
+job_status_df='GOLD_EUDM_LIST'
+webhook_url = webhook_url
+success_email_to=email_to
+businessunit='GOLD_EUDM'
+teams_job_report(job_status_df,webhook_url,env_val,businessunit)
+if email_flag =='Y':
+    send_email(job_status_df,env_val,success_email_to,businessunit)
