@@ -1,2 +1,7 @@
 this is giving error 
 SMTP_SERVER = dbutils.widgets.get("smtp_server")
+
+
+try:    SMTP_SERVER = dbutils.widgets.get("smtp_server")
+except Exception:
+    SMTP_SERVER = 'localhost'  # or any default SMTP server
