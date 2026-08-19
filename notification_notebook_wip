@@ -1,7 +1,17 @@
-this is giving error 
+try:
+    SMTP_SERVER = dbutils.widgets.get("smtp_server")
+except Exception:
+    print("Warning: 'smtp_server' parameter not provided. Defaulting to 'localhost'.")
+    SMTP_SERVER = 'localhost'  # Update this to your actual default
+
+
+
+
+# Initialize the widget with a default value (e.g., 'localhost' or 'smtp.office365.com')
+dbutils.widgets.text("smtp_server", "localhost") 
+
+# Now this will never throw an error, even if run manually
 SMTP_SERVER = dbutils.widgets.get("smtp_server")
 
 
-try:    SMTP_SERVER = dbutils.widgets.get("smtp_server")
-except Exception:
-    SMTP_SERVER = 'localhost'  # or any default SMTP server
+
