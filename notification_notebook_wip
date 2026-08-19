@@ -1,37 +1,19 @@
-try:
-    SMTP_SERVER = dbutils.widgets.get("smtp_server")
-except Exception:
-    print("Warning: 'smtp_server' parameter not provided. Defaulting to 'localhost'.")
-    SMTP_SERVER = 'localhost'  # Update this to your actual default
-
-
-
-
-# Initialize the widget with a default value (e.g., 'localhost' or 'smtp.office365.com')
-dbutils.widgets.text("smtp_server", "localhost") 
-
-# Now this will never throw an error, even if run manually
-SMTP_SERVER = dbutils.widgets.get("smtp_server")
-
-
-
-
-
-
-# Configuration Settings
-dbutils.widgets.text("smtp_server", "smtp.office365.com") # Or your chosen default
-SMTP_SERVER = dbutils.widgets.get("smtp_server")
-SMTP_PORT = 25  
-SENDER_EMAIL = "noreply-databricks@wescodist.com"
-
-# Update your recipient list here
-RECIPIENTS = [
-    "rameez.faisal@wescodist.com"
-    # "BI_Wesco_Integration_Support_L2@wescodist.com",
-    # "srichard@wescodist.com",
-    # "vgolla@wescodist.com",
-    # "srilatha.mahankali@wescodist.com"
-]
-
-SUBJECT = "Digital Dashboard and Source records comparision Daily"
-
+ConnectionRefusedError: [Errno 111] Connection refused
+[Trace ID: 00-d9fad178c56ad2b84d7c6cc543380fa9-cabc7b29f9f61e7a-00]
+File <command-5647246402699411>, line 30
+     21 # 3. Send mismatch email containing the query (avoiding heavy CSV processing)
+     22 email_body = (
+     23     f"Hi Team,\n\n"
+     24     f"Data validation failed: Found {mismatch_count} mismatched records between the digital dashboard and source summary.\n\n"
+   (...)
+     27     f"Thank you,\nDatabricks Automation"
+     28 )
+---> 30 send_smtp_email(SUBJECT, email_body, RECIPIENTS)
+     32 # 4. Fail the notebook job run to alert pipeline orchestrator
+     33 raise Exception(f"Digital Dashboard Mismatch Audit Failed! {mismatch_count} rows differ. Please query gld_eudm.digital_dashboard_records_mismatch for details.")
+File /usr/lib/python3.12/socket.py:837, in create_connection(address, timeout, source_address, all_errors)
+    835 if source_address:
+    836     sock.bind(source_address)
+--> 837 sock.connect(sa)
+    838 # Break explicitly a reference cycle
+    839 exceptions.clear()
