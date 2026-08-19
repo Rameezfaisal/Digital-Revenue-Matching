@@ -1,40 +1,75 @@
-mismatch_count = mismatch_df.count()
+import smtplib, ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from pyspark.sql.functions import current_timestamp
+import json
+import re
 
-if mismatch_count > 0:
-    print(f"Data validation completed: Found {mismatch_count} mismatched records.")
-    
-    # 1. Add audit timestamp and write to the Delta audit table
-    audit_df = mismatch_df.withColumn("audit_timestamp", current_timestamp())
-    audit_df.write \
-        .format("delta") \
-        .mode("append") \
-        .saveAsTable("gld_eudm.digital_dashboard_records_mismatch")
-    
-    # 2. Construct the SQL query for the user to investigate
-    query_to_run = (
-        f"SELECT * \n"
-        f"FROM gld_eudm.digital_dashboard_records_mismatch \n"
-        f"WHERE CAST(audit_timestamp AS DATE) = current_date() \n"
-        f"ORDER BY audit_timestamp DESC;"
-    )
-    
-    # 3. Send mismatch email containing the query
-    email_body = (
-        f"Hi Team,\n\n"
-        f"Data validation found {mismatch_count} mismatched records between the digital dashboard and source summary.\n\n"
-        f"To investigate the differences, please copy and run the following query in your Databricks SQL workspace:\n\n"
-        f"{query_to_run}\n\n"
-        f"Thank you,\nDatabricks Automation"
-    )
-    
-    send_smtp_email(SUBJECT, email_body, RECIPIENTS)
-        
-    # 4. Proceed without failing the notebook
-    print("Mismatch email sent successfully. Notebook execution finishing successfully.")
+# --- Configuration Settings ---
+SMTP_HOST = "smtp.office365.com"
+SMTP_PORT = 587
 
-else:
-    print("Data validation passed: No mismatches found between the view and summary table.")
+# Fetch credentials securely
+SMTP_USER = dbutils.secrets.get("ddpscopekeyvault001", "kvSvcDDPDatabricksNPUserName")
+SMTP_PASS = dbutils.secrets.get("ddpscopekeyvault001", "kvSvcDDPDatabricksnp")
+SENDER_EMAIL = SMTP_USER 
+SUBJECT = "Digital Dashboard and Source records comparision Daily"
+
+# 1. Fetch and parse the additional_parameter_dictionary
+try:
+    # Get the dictionary passed from the orchestrator (e.g., Azure Data Factory)
+    param_dict_str = dbutils.widgets.get("additional_parameter_dictionary")
+    param_dict = json.loads(param_dict_str)
     
-    # Send success email matching Teradata script behavior
-    email_body = "There is no mismatch between Digital Dashboard and Source Record."
-    send_smtp_email(SUBJECT, email_body, RECIPIENTS)
+    # Extract the email string. Change "email_recipients" to match your exact JSON key.
+    email_string = param_dict.get("email_recipients", "rameez.faisal@wescodist.com")
+except Exception:
+    print("Warning: additional_parameter_dictionary not found or invalid. Defaulting to fallback email.")
+    email_string = "rameez.faisal@wescodist.com"
+
+# 2. Safely parse the email string into a list (borrowed from reference notebook logic)
+EMAIL_SPLIT = re.compile(r"[;,]")
+
+def split_emails(val):
+    """Splits a string of emails separated by commas or semicolons into a clean list."""
+    if not isinstance(val, str):
+        return []
+    parts = EMAIL_SPLIT.split(val)
+    out = []
+    for e in parts:
+        s = e.strip()
+        if s:
+            out.append(s)
+    return out
+
+# 3. Create the final RECIPIENTS list
+RECIPIENTS = split_emails(email_string)
+print(f"Emails will be sent to: {RECIPIENTS}")
+
+def send_smtp_email(subject, body, recipients):
+    """Utility function to send emails securely via Office365 SMTP."""
+    # Prevent sending if the recipient list is somehow empty
+    if not recipients:
+        print("No valid recipients found. Skipping email notification.")
+        return
+
+    msg = MIMEMultipart()
+    msg['From'] = SENDER_EMAIL
+    msg['To'] = ", ".join(recipients)
+    msg['Subject'] = subject
+
+    msg.attach(MIMEText(body, 'plain'))
+
+    try:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as s:
+            s.ehlo()
+            s.starttls(context=ctx)
+            s.ehlo()
+            s.login(SMTP_USER, SMTP_PASS)
+            s.sendmail(SENDER_EMAIL, recipients, msg.as_string())
+            
+        print(f"Email sent successfully to {', '.join(recipients)}")
+    except Exception as e:
+        print(f"Failed to send email via SMTP: {str(e)}")
+        raise e
