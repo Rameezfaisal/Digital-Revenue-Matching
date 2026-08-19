@@ -1,12 +1,40 @@
-Exception: Digital Dashboard Mismatch Audit Failed! 1153 rows differ. Please query gld_eudm.digital_dashboard_records_mismatch for details.
-[Trace ID: 00-708417df156e87f0b0412c29ecc4841e-924179a4dfb3f522-00]
----------------------------------------------------------------------------
-Exception                                 Traceback (most recent call last)
-File <command-5647246402699411>, line 33
-     30     send_smtp_email(SUBJECT, email_body, RECIPIENTS)
-     32     # 4. Fail the notebook job run to alert pipeline orchestrator
----> 33     raise Exception(f"Digital Dashboard Mismatch Audit Failed! {mismatch_count} rows differ. Please query gld_eudm.digital_dashboard_records_mismatch for details.")
-     35 else:
-     36     print("Data validation passed: No mismatches found between the view and summary table.")
+mismatch_count = mismatch_df.count()
 
-Exception: Digital Dashboard Mismatch Audit Failed! 1153 rows differ. Please query gld_eudm.digital_dashboard_records_mismatch for details.
+if mismatch_count > 0:
+    print(f"Data validation completed: Found {mismatch_count} mismatched records.")
+    
+    # 1. Add audit timestamp and write to the Delta audit table
+    audit_df = mismatch_df.withColumn("audit_timestamp", current_timestamp())
+    audit_df.write \
+        .format("delta") \
+        .mode("append") \
+        .saveAsTable("gld_eudm.digital_dashboard_records_mismatch")
+    
+    # 2. Construct the SQL query for the user to investigate
+    query_to_run = (
+        f"SELECT * \n"
+        f"FROM gld_eudm.digital_dashboard_records_mismatch \n"
+        f"WHERE CAST(audit_timestamp AS DATE) = current_date() \n"
+        f"ORDER BY audit_timestamp DESC;"
+    )
+    
+    # 3. Send mismatch email containing the query
+    email_body = (
+        f"Hi Team,\n\n"
+        f"Data validation found {mismatch_count} mismatched records between the digital dashboard and source summary.\n\n"
+        f"To investigate the differences, please copy and run the following query in your Databricks SQL workspace:\n\n"
+        f"{query_to_run}\n\n"
+        f"Thank you,\nDatabricks Automation"
+    )
+    
+    send_smtp_email(SUBJECT, email_body, RECIPIENTS)
+        
+    # 4. Proceed without failing the notebook
+    print("Mismatch email sent successfully. Notebook execution finishing successfully.")
+
+else:
+    print("Data validation passed: No mismatches found between the view and summary table.")
+    
+    # Send success email matching Teradata script behavior
+    email_body = "There is no mismatch between Digital Dashboard and Source Record."
+    send_smtp_email(SUBJECT, email_body, RECIPIENTS)
