@@ -1,19 +1,46 @@
-ConnectionRefusedError: [Errno 111] Connection refused
-[Trace ID: 00-d9fad178c56ad2b84d7c6cc543380fa9-cabc7b29f9f61e7a-00]
-File <command-5647246402699411>, line 30
-     21 # 3. Send mismatch email containing the query (avoiding heavy CSV processing)
-     22 email_body = (
-     23     f"Hi Team,\n\n"
-     24     f"Data validation failed: Found {mismatch_count} mismatched records between the digital dashboard and source summary.\n\n"
-   (...)
-     27     f"Thank you,\nDatabricks Automation"
-     28 )
----> 30 send_smtp_email(SUBJECT, email_body, RECIPIENTS)
-     32 # 4. Fail the notebook job run to alert pipeline orchestrator
-     33 raise Exception(f"Digital Dashboard Mismatch Audit Failed! {mismatch_count} rows differ. Please query gld_eudm.digital_dashboard_records_mismatch for details.")
-File /usr/lib/python3.12/socket.py:837, in create_connection(address, timeout, source_address, all_errors)
-    835 if source_address:
-    836     sock.bind(source_address)
---> 837 sock.connect(sa)
-    838 # Break explicitly a reference cycle
-    839 exceptions.clear()
+import smtplib, ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from pyspark.sql.functions import current_timestamp
+
+# --- Updated Configuration Settings from Reference Notebook ---
+SMTP_HOST = "smtp.office365.com"
+SMTP_PORT = 587
+
+# Fetch credentials securely using the exact scope from the senior's notebook
+SMTP_USER = dbutils.secrets.get("ddpscopekeyvault001", "kvSvcDDPDatabricksNPUserName")
+SMTP_PASS = dbutils.secrets.get("ddpscopekeyvault001", "kvSvcDDPDatabricksnp")
+
+# Important: The sender email usually needs to match the authenticated user 
+# or an allowed alias when using Office365 SMTP.
+SENDER_EMAIL = SMTP_USER 
+
+# Update your recipient list here for testing
+RECIPIENTS = [
+    "rameez.faisal@wescodist.com"
+]
+SUBJECT = "Digital Dashboard and Source records comparision Daily"
+
+def send_smtp_email(subject, body, recipients):
+    """Utility function to send emails securely via Office365 SMTP."""
+    msg = MIMEMultipart()
+    msg['From'] = SENDER_EMAIL
+    msg['To'] = ", ".join(recipients)
+    msg['Subject'] = subject
+
+    msg.attach(MIMEText(body, 'plain'))
+
+    try:
+        # Create a secure SSL context and authenticate just like the reference script
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as s:
+            s.ehlo()
+            s.starttls(context=ctx)
+            s.ehlo()
+            s.login(SMTP_USER, SMTP_PASS)
+            s.sendmail(SENDER_EMAIL, recipients, msg.as_string())
+            
+        print(f"Email sent successfully to {', '.join(recipients)}")
+    except Exception as e:
+        print(f"Failed to send email via SMTP: {str(e)}")
+        raise e
