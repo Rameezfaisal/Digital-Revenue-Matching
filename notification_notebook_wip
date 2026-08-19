@@ -1,46 +1,12 @@
-import smtplib, ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from pyspark.sql.functions import current_timestamp
+Exception: Digital Dashboard Mismatch Audit Failed! 1153 rows differ. Please query gld_eudm.digital_dashboard_records_mismatch for details.
+[Trace ID: 00-708417df156e87f0b0412c29ecc4841e-924179a4dfb3f522-00]
+---------------------------------------------------------------------------
+Exception                                 Traceback (most recent call last)
+File <command-5647246402699411>, line 33
+     30     send_smtp_email(SUBJECT, email_body, RECIPIENTS)
+     32     # 4. Fail the notebook job run to alert pipeline orchestrator
+---> 33     raise Exception(f"Digital Dashboard Mismatch Audit Failed! {mismatch_count} rows differ. Please query gld_eudm.digital_dashboard_records_mismatch for details.")
+     35 else:
+     36     print("Data validation passed: No mismatches found between the view and summary table.")
 
-# --- Updated Configuration Settings from Reference Notebook ---
-SMTP_HOST = "smtp.office365.com"
-SMTP_PORT = 587
-
-# Fetch credentials securely using the exact scope from the senior's notebook
-SMTP_USER = dbutils.secrets.get("ddpscopekeyvault001", "kvSvcDDPDatabricksNPUserName")
-SMTP_PASS = dbutils.secrets.get("ddpscopekeyvault001", "kvSvcDDPDatabricksnp")
-
-# Important: The sender email usually needs to match the authenticated user 
-# or an allowed alias when using Office365 SMTP.
-SENDER_EMAIL = SMTP_USER 
-
-# Update your recipient list here for testing
-RECIPIENTS = [
-    "rameez.faisal@wescodist.com"
-]
-SUBJECT = "Digital Dashboard and Source records comparision Daily"
-
-def send_smtp_email(subject, body, recipients):
-    """Utility function to send emails securely via Office365 SMTP."""
-    msg = MIMEMultipart()
-    msg['From'] = SENDER_EMAIL
-    msg['To'] = ", ".join(recipients)
-    msg['Subject'] = subject
-
-    msg.attach(MIMEText(body, 'plain'))
-
-    try:
-        # Create a secure SSL context and authenticate just like the reference script
-        ctx = ssl.create_default_context()
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as s:
-            s.ehlo()
-            s.starttls(context=ctx)
-            s.ehlo()
-            s.login(SMTP_USER, SMTP_PASS)
-            s.sendmail(SENDER_EMAIL, recipients, msg.as_string())
-            
-        print(f"Email sent successfully to {', '.join(recipients)}")
-    except Exception as e:
-        print(f"Failed to send email via SMTP: {str(e)}")
-        raise e
+Exception: Digital Dashboard Mismatch Audit Failed! 1153 rows differ. Please query gld_eudm.digital_dashboard_records_mismatch for details.
