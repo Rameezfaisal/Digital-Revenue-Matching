@@ -12,9 +12,20 @@ SELECT * FROM (
     CAST(SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) * coalesce(cr.conversion_rate, 1) AS DECIMAL(38,12)) as sales_amount_USD, 
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
-    LEFT JOIN of_order_fact uof ON (uof.sales_order_no = sf.wesnet_order_no AND uof.datasource_num_id = sf.datasource_num_id AND uof.branch_id = sf.branch_id AND uof.order_integration_id = sf.order_integration_id)
-    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.flex_1 AND doc.datasource_num_id = uof.datasource_num_id)
-    LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
+    LEFT JOIN (
+        SELECT DISTINCT sales_order_no, branch_id, datasource_num_id, order_integration_id, flex_1 
+        FROM brz_teradata.udm_order_fact
+    ) uof ON (
+        CAST(uof.sales_order_no AS STRING) = CAST(sf.wesnet_order_no AS STRING) 
+        AND CAST(uof.datasource_num_id AS INT) = CAST(sf.datasource_num_id AS INT) 
+        AND TRIM(CAST(uof.branch_id AS STRING)) = TRIM(CAST(sf.branch_id AS STRING)) 
+        AND CAST(uof.order_integration_id AS STRING) = CAST(sf.order_integration_id AS STRING)
+    )
+    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id 
+    LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.flex_1 AND doc.datasource_num_id = uof.datasource_num_id)
+    LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id 
+    LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key 
+    LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
     WHERE sf.datasource_num_id = 3000 AND sf.accounting_include_flag = 'Y' AND coalesce(sf.sales_transfer_flag, 'N') <> 'Y' AND coalesce(sf.kit_component_flag, 'N') <> 'C' AND left(cus.customer_no, 1) <> 'X' AND sf.sim_description <> 'Datacom Redaction' AND coalesce(sf.inventory_org_code, '') <> 'SCS' AND (sf.sales_amount <> 0 OR sf.cost_amount <> 0 OR sf.quantity <> 0 OR sf.market_cost <> 0) AND sf.transaction_type <> 'X99'
     GROUP BY sf.datasource_num_id, uof.flex_1, bd.sbu, doc.rollup_category, sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.wesnet_order_no, dt.datasource_description, cr.conversion_rate
     HAVING SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) <> 0
@@ -28,9 +39,19 @@ SELECT * FROM (
     CAST(SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) * coalesce(cr.conversion_rate, 1) AS DECIMAL(38,12)) as sales_amount_USD, 
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
-    LEFT JOIN of_order_fact uof ON (uof.sales_order_no = sf.order_number AND sf.branch_id = uof.branch_id AND uof.datasource_num_id = 5000)
-    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id)
-    LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
+    LEFT JOIN (
+        SELECT DISTINCT ent_type, sales_order_no, branch_id 
+        FROM brz_teradata.udm_order_fact 
+        WHERE datasource_num_id = 5000
+    ) uof ON (
+        CAST(uof.sales_order_no AS STRING) = CAST(sf.order_number AS STRING) 
+        AND TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING))
+    )
+    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id 
+    LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id)
+    LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id 
+    LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key 
+    LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
     WHERE sf.datasource_num_id = 5000
     GROUP BY sf.datasource_num_id, uof.ent_type, bd.sbu, doc.rollup_category, sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, dt.datasource_description, cr.conversion_rate
     HAVING SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) <> 0
@@ -43,9 +64,18 @@ SELECT * FROM (
     CAST(SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) * coalesce(cr.conversion_rate, 1) AS DECIMAL(38,12)) as sales_amount_USD, 
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
-    LEFT JOIN of_order_fact uof ON (uof.sales_order_no = sf.order_number AND uof.datasource_num_id = sf.datasource_num_id)
-    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = uof.datasource_num_id)
-    LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
+    LEFT JOIN (
+        SELECT DISTINCT sales_order_no, datasource_num_id, branch_id, ent_type 
+        FROM brz_teradata.udm_order_fact
+    ) uof ON (
+        CAST(uof.sales_order_no AS STRING) = CAST(sf.order_number AS STRING) 
+        AND CAST(uof.datasource_num_id AS INT) = CAST(sf.datasource_num_id AS INT)
+    )
+    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id 
+    LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = uof.datasource_num_id)
+    LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id 
+    LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key 
+    LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
     WHERE sf.datasource_num_id = 9000 AND coalesce(sf.sales_transfer_flag, 'N') <> 'Y' AND coalesce(sf.kit_component_flag, 'N') <> 'C' AND left(cus.customer_no, 1) <> 'X' AND sf.sim_description <> 'Datacom Redaction' AND (sf.sales_amount <> 0 OR sf.cost_amount <> 0 OR sf.quantity <> 0 OR sf.market_cost <> 0) AND sf.transaction_type <> 'X99'
     GROUP BY sf.datasource_num_id, uof.ent_type, bd.sbu, doc.rollup_category, sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, dt.datasource_description, cr.conversion_rate
     HAVING SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) <> 0
@@ -58,8 +88,20 @@ SELECT * FROM (
     CAST(SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) * coalesce(cr.conversion_rate, 1) AS DECIMAL(38,12)) as sales_amount_USD, 
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
-    LEFT JOIN of_order_fact uof ON (uof.sales_order_no = sf.order_number AND sf.branch_id = uof.branch_id AND uof.datasource_num_id = 13000 AND uof.ent_type IN (SELECT doc2.ent_type FROM dim_digital_channel doc2 WHERE doc2.datasource_num_id = 13000 AND doc2.rollup_category IN ('Websites','Materials Management','Integrations')))
-    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
+    LEFT JOIN (
+        SELECT DISTINCT ent_type, sales_order_no, branch_id 
+        FROM brz_teradata.udm_order_fact 
+        WHERE datasource_num_id = 13000 
+          AND ent_type IN (SELECT doc2.ent_type FROM dim_digital_channel doc2 WHERE doc2.datasource_num_id = 13000 AND doc2.rollup_category IN ('Websites','Materials Management','Integrations'))
+    ) uof ON (
+        CAST(uof.sales_order_no AS STRING) = CAST(sf.order_number AS STRING) 
+        AND TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING))
+    )
+    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id 
+    LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) 
+    LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id 
+    LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key 
+    LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
     WHERE sf.datasource_num_id = 13000 AND coalesce(cus.intercompany_customer, 'N') = 'N' AND sf.accounting_include_flag = 'Y' AND coalesce(sf.sales_transfer_flag, 'N') <> 'Y' AND coalesce(sf.kit_component_flag, 'N') <> 'C'
     GROUP BY sf.datasource_num_id, uof.ent_type, bd.sbu, doc.rollup_category, sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, dt.datasource_description, cr.conversion_rate
     HAVING SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) <> 0
@@ -72,8 +114,20 @@ SELECT * FROM (
     CAST(SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) * coalesce(cr.conversion_rate, 1) AS DECIMAL(38,12)) as sales_amount_USD, 
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
-    LEFT JOIN of_order_fact uof ON (cast(uof.sales_order_no as bigint) = cast(sf.order_number as bigint) AND sf.branch_id = uof.branch_id AND uof.WesnetLine = sf.invoice_line_no AND uof.datasource_num_id = 11000)
-    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id LEFT JOIN dim_digital_channel doc ON (REGEXP_REPLACE(doc.ent_type, '       ', '') = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
+    LEFT JOIN (
+        SELECT DISTINCT ent_type, sales_order_no, branch_id, WesnetLine 
+        FROM brz_teradata.udm_order_fact 
+        WHERE datasource_num_id = 11000
+    ) uof ON (
+        CAST(uof.sales_order_no AS BIGINT) = CAST(sf.order_number AS BIGINT) 
+        AND TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING)) 
+        AND CAST(uof.WesnetLine AS STRING) = CAST(sf.invoice_line_no AS STRING)
+    )
+    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id 
+    LEFT JOIN dim_digital_channel doc ON (REGEXP_REPLACE(doc.ent_type, '       ', '') = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) 
+    LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id 
+    LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key 
+    LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
     WHERE sf.datasource_num_id = 11000 AND coalesce(cus.intercompany_customer, 'N') = 'N'
     GROUP BY sf.datasource_num_id, uof.ent_type, bd.sbu, doc.rollup_category, sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, dt.datasource_description, cr.conversion_rate
     HAVING SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) <> 0
@@ -86,8 +140,19 @@ SELECT * FROM (
     CAST(SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) * coalesce(cr.conversion_rate, 1) AS DECIMAL(38,12)) as sales_amount_USD, 
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
-    LEFT JOIN of_order_fact uof ON (uof.sales_order_no = sf.order_number AND sf.branch_id = uof.branch_id AND uof.datasource_num_id = 14000)
-    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
+    LEFT JOIN (
+        SELECT DISTINCT ent_type, sales_order_no, branch_id 
+        FROM brz_teradata.udm_order_fact 
+        WHERE datasource_num_id = 14000
+    ) uof ON (
+        CAST(uof.sales_order_no AS STRING) = CAST(sf.order_number AS STRING) 
+        AND TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING))
+    )
+    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id 
+    LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) 
+    LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id 
+    LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key 
+    LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
     WHERE sf.datasource_num_id = 14000 AND sf.accounting_include_flag = 'Y' AND coalesce(sf.sales_transfer_flag, 'N') <> 'Y' AND coalesce(sf.kit_component_flag, 'N') <> 'C'
     GROUP BY sf.datasource_num_id, uof.ent_type, bd.sbu, doc.rollup_category, sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, dt.datasource_description, cr.conversion_rate
     HAVING SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) <> 0
@@ -100,8 +165,19 @@ SELECT * FROM (
     CAST(SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) * coalesce(cr.conversion_rate, 1) AS DECIMAL(38,12)) as sales_amount_USD, 
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
-    LEFT JOIN of_order_fact uof ON (sf.order_number = uof.sales_order_no AND sf.branch_id = uof.branch_id AND uof.datasource_num_id = 10000)
-    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
+    LEFT JOIN (
+        SELECT DISTINCT ent_type, sales_order_no, branch_id 
+        FROM brz_teradata.udm_order_fact 
+        WHERE datasource_num_id = 10000
+    ) uof ON (
+        CAST(sf.order_number AS STRING) = CAST(uof.sales_order_no AS STRING) 
+        AND TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING))
+    )
+    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id 
+    LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) 
+    LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id 
+    LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key 
+    LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
     WHERE sf.datasource_num_id = 10000
     GROUP BY sf.datasource_num_id, coalesce(uof.ent_type, 'e-Crib'), bd.sbu, coalesce(doc.rollup_category, 'Materials Management'), sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, dt.datasource_description, cr.conversion_rate
     HAVING SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) <> 0
@@ -114,8 +190,19 @@ SELECT * FROM (
     CAST(SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) * coalesce(cr.conversion_rate, 1) AS DECIMAL(38,12)) as sales_amount_USD, 
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
-    LEFT JOIN of_order_fact uof ON (sf.order_number = uof.sales_order_no AND sf.flex_1 = uof.flex_1 AND uof.datasource_num_id = 4000)
-    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
+    LEFT JOIN (
+        SELECT DISTINCT ent_type, sales_order_no, flex_1 
+        FROM brz_teradata.udm_order_fact 
+        WHERE datasource_num_id = 4000
+    ) uof ON (
+        CAST(sf.order_number AS STRING) = CAST(uof.sales_order_no AS STRING) 
+        AND CAST(sf.flex_1 AS STRING) = CAST(uof.flex_1 AS STRING)
+    )
+    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id 
+    LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) 
+    LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id 
+    LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key 
+    LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
     WHERE sf.datasource_num_id = 4000 AND sf.accounting_include_flag = 'Y' AND (CASE WHEN (UPPER(cus.national_acct_no) IN ('ICO','ANIX','INTE','WESC','WDB','LIB') OR UPPER(cus.customer_name) LIKE '%WESCO%' OR UPPER(cus.customer_name) LIKE '%ANIXTER%') THEN 'Y' ELSE 'N' END) <> 'Y' AND coalesce(sf.sales_transfer_flag, 'N') <> 'Y' AND coalesce(sf.kit_component_flag, 'N') <> 'C' AND left(cus.customer_no, 1) <> 'X' AND sf.sim_description <> 'Datacom Redaction' AND coalesce(sf.inventory_org_code, '') <> 'SCS' AND (sf.sales_amount <> 0 OR sf.cost_amount <> 0 OR sf.quantity <> 0 OR sf.market_cost <> 0) AND sf.transaction_type <> 'X99'
     GROUP BY sf.datasource_num_id, uof.ent_type, bd.sbu, doc.rollup_category, sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, dt.datasource_description, cr.conversion_rate
     HAVING SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) <> 0
@@ -128,8 +215,21 @@ SELECT * FROM (
     CAST(SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) * coalesce(cr.conversion_rate, 1) AS DECIMAL(38,12)) as sales_amount_USD, 
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
-    LEFT JOIN of_order_fact uof ON (uof.sales_order_no = sf.wesnet_order_no AND sf.branch_id = uof.branch_id AND uof.datasource_num_id = sf.datasource_num_id AND uof.ent_type IN ('RDC','EDI','MBL','IX') AND concat(uof.sales_order_no, '.', lpad(uof.invoice_no, 3, '0')) = sf.invoice_no)
-    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
+    LEFT JOIN (
+        SELECT DISTINCT ent_type, sales_order_no, branch_id, datasource_num_id, invoice_no 
+        FROM brz_teradata.udm_order_fact
+    ) uof ON (
+        CAST(uof.sales_order_no AS STRING) = CAST(sf.wesnet_order_no AS STRING) 
+        AND TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING)) 
+        AND CAST(uof.datasource_num_id AS INT) = CAST(sf.datasource_num_id AS INT) 
+        AND uof.ent_type IN ('RDC','EDI','MBL','IX') 
+        AND concat(CAST(uof.sales_order_no AS STRING), '.', lpad(CAST(uof.invoice_no AS STRING), 3, '0')) = CAST(sf.invoice_no AS STRING)
+    )
+    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id 
+    LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) 
+    LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id 
+    LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key 
+    LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
     WHERE sf.datasource_num_id IN (6000, 7000, 8000)
     GROUP BY sf.datasource_num_id, uof.ent_type, bd.sbu, doc.rollup_category, sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, dt.datasource_description, cr.conversion_rate
     HAVING SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) <> 0
@@ -142,8 +242,28 @@ SELECT * FROM (
     CAST(SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) * coalesce(CASE WHEN sf.currency = 'USD' THEN 1 ELSE coalesce(cr.conversion_rate, acr.CURR_CONV_ACTUAL_F) END, sf.conversion_rate) AS DECIMAL(38,12)) as sales_amount_USD, 
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
-    LEFT JOIN (SELECT distinct sales_order_no, invoice_no, CASE WHEN trim(ent_type) = 'EDI' THEN 'EDI Sales' WHEN ent_type = 'WOE' THEN 'Web Order Entry (WOE)' WHEN ent_type = 'MBAS' THEN 'Virtual Warehouse' WHEN ent_type = 'CRM' THEN 'Vending Machines' WHEN ent_type = 'Manual' AND customer_po_no = 'CRIBMASTER' THEN 'Vending Machines' ELSE ent_type END as ent_type1 FROM of_order_fact) uof ON (uof.sales_order_no = sf.order_number AND trim(concat(uof.sales_order_no, '.', uof.invoice_no)) = sf.invoice_no)
-    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type1 AND doc.datasource_num_id = sf.datasource_num_id) LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month) LEFT JOIN anixter_conv_rates acr ON (acr.FROM_CURR_C = sf.currency AND acr.rate_type = 'MTEND' AND year(sf.date_invoice) = acr.FISCAL_YY_D AND month(sf.date_invoice) = acr.FISCAL_MM_D)
+    LEFT JOIN (
+        SELECT DISTINCT ent_type, 
+        CASE 
+            WHEN trim(ent_type) = 'EDI' THEN 'EDI Sales' 
+            WHEN ent_type = 'WOE' THEN 'Web Order Entry (WOE)' 
+            WHEN ent_type = 'MBAS' THEN 'Virtual Warehouse' 
+            WHEN ent_type = 'CRM' THEN 'Vending Machines' 
+            WHEN ent_type = 'Manual' AND customer_po_no = 'CRIBMASTER' THEN 'Vending Machines' 
+            ELSE ent_type 
+        END as ent_type1, 
+        sales_order_no, branch_id, datasource_num_id, invoice_no, date_invoice 
+        FROM brz_teradata.udm_order_fact
+    ) uof ON (
+        CAST(uof.sales_order_no AS STRING) = CAST(sf.order_number AS STRING) 
+        AND trim(concat(CAST(uof.sales_order_no AS STRING), '.', CAST(uof.invoice_no AS STRING))) = CAST(sf.invoice_no AS STRING)
+    )
+    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id 
+    LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type1 AND doc.datasource_num_id = sf.datasource_num_id) 
+    LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id 
+    LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key 
+    LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month) 
+    LEFT JOIN anixter_conv_rates acr ON (acr.FROM_CURR_C = sf.currency AND acr.rate_type = 'MTEND' AND year(sf.date_invoice) = acr.FISCAL_YY_D AND month(sf.date_invoice) = acr.FISCAL_MM_D)
     WHERE sf.datasource_num_id = 12001 AND sf.accounting_include_flag = 'Y' AND coalesce(sf.sales_transfer_flag, 'N') <> 'Y' AND coalesce(sf.kit_component_flag, 'N') <> 'C' AND cus.intercompany_customer <> 'Y'
     GROUP BY sf.datasource_num_id, uof.ent_type1, bd.sbu, doc.rollup_category, sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, dt.datasource_name, cr.conversion_rate, acr.CURR_CONV_ACTUAL_F, sf.conversion_rate
     HAVING SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) <> 0
@@ -156,8 +276,21 @@ SELECT * FROM (
     CAST(SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) * coalesce(CASE WHEN sf.currency = 'USD' THEN 1 ELSE acr.CURR_CONV_ACTUAL_F END, sf.budget_conversion_rate) AS DECIMAL(38,12)) as sales_amount_USD, 
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
-    LEFT JOIN of_order_fact uof ON (sf.branch_id = uof.branch_id AND uof.datasource_num_id = sf.datasource_num_id AND uof.date_invoice = sf.date_invoice AND uof.invoice_no = CASE WHEN instr(sf.invoice_no, '-') > 0 THEN substring(sf.invoice_no, 1, instr(sf.invoice_no, '-') - 1) ELSE sf.invoice_no END AND uof.sales_order_no = sf.order_number)
-    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key LEFT JOIN anixter_conv_rates acr ON (acr.FROM_CURR_C = sf.currency AND acr.rate_type = 'MTEND' AND year(sf.date_invoice) = acr.FISCAL_YY_D AND month(sf.date_invoice) = acr.FISCAL_MM_D)
+    LEFT JOIN (
+        SELECT DISTINCT ent_type, sales_order_no, branch_id, datasource_num_id, invoice_no, date_invoice 
+        FROM brz_teradata.udm_order_fact
+    ) uof ON (
+        TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING)) 
+        AND CAST(uof.datasource_num_id AS INT) = CAST(sf.datasource_num_id AS INT) 
+        AND uof.date_invoice = sf.date_invoice 
+        AND uof.invoice_no = CASE WHEN instr(sf.invoice_no, '-') > 0 THEN substring(sf.invoice_no, 1, instr(sf.invoice_no, '-') - 1) ELSE sf.invoice_no END 
+        AND CAST(uof.sales_order_no AS STRING) = CAST(sf.order_number AS STRING)
+    )
+    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id 
+    LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) 
+    LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id 
+    LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key 
+    LEFT JOIN anixter_conv_rates acr ON (acr.FROM_CURR_C = sf.currency AND acr.rate_type = 'MTEND' AND year(sf.date_invoice) = acr.FISCAL_YY_D AND month(sf.date_invoice) = acr.FISCAL_MM_D)
     WHERE sf.datasource_num_id IN (12002, 12003, 12004) AND trunc(sf.date_invoice, 'MM') <> trunc(current_date(), 'MM') AND coalesce(cus.intercompany_customer, 'N') <> 'Y'
     GROUP BY sf.datasource_num_id, uof.ent_type, bd.sbu, doc.rollup_category, sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, dt.datasource_description, acr.CURR_CONV_ACTUAL_F, sf.budget_conversion_rate
     HAVING SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) <> 0
@@ -170,8 +303,20 @@ SELECT * FROM (
     CAST(SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) * coalesce(CASE WHEN sf.currency = 'USD' THEN 1 ELSE coalesce(cr.conversion_rate, acr.CURR_CONV_ACTUAL_F) END, sf.conversion_rate) AS DECIMAL(38,12)) as sales_amount_USD, 
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
-    LEFT JOIN of_order_fact uof ON (sf.branch_id = uof.branch_id AND uof.datasource_num_id = sf.datasource_num_id AND cast(uof.sales_order_no as bigint) = cast(sf.order_number as bigint))
-    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month) LEFT JOIN anixter_conv_rates acr ON (acr.FROM_CURR_C = sf.currency AND acr.rate_type = 'MTEND' AND year(sf.date_invoice) = acr.FISCAL_YY_D AND month(sf.date_invoice) = acr.FISCAL_MM_D)
+    LEFT JOIN (
+        SELECT DISTINCT ent_type, sales_order_no, branch_id, datasource_num_id, invoice_no, date_invoice 
+        FROM brz_teradata.udm_order_fact
+    ) uof ON (
+        TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING)) 
+        AND CAST(uof.datasource_num_id AS INT) = CAST(sf.datasource_num_id AS INT) 
+        AND CAST(uof.sales_order_no AS BIGINT) = CAST(sf.order_number AS BIGINT)
+    )
+    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id 
+    LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) 
+    LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id 
+    LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key 
+    LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month) 
+    LEFT JOIN anixter_conv_rates acr ON (acr.FROM_CURR_C = sf.currency AND acr.rate_type = 'MTEND' AND year(sf.date_invoice) = acr.FISCAL_YY_D AND month(sf.date_invoice) = acr.FISCAL_MM_D)
     WHERE sf.datasource_num_id = 12005 AND sf.accounting_include_flag = 'Y' AND coalesce(sf.sales_transfer_flag, 'N') <> 'Y' AND coalesce(sf.kit_component_flag, 'N') <> 'C'
     GROUP BY sf.datasource_num_id, uof.ent_type, bd.sbu, doc.rollup_category, sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, dt.datasource_name, cr.conversion_rate, acr.CURR_CONV_ACTUAL_F, sf.conversion_rate
     HAVING SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) <> 0
