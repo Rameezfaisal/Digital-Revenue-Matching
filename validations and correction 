@@ -1,27 +1,20 @@
--- Run in both Databricks and Teradata
-SELECT 
-    EXTRACT(YEAR FROM date_invoice) AS invoice_year, 
-    COUNT(*) AS total_rows,
-    SUM(sales_amount) AS total_sales
-FROM gld_eudm.digital_dashboard_control -- (Use dss_marts.digital_dashboard_control for Teradata)
-WHERE datasource_num_id = 3000
-GROUP BY EXTRACT(YEAR FROM date_invoice)
-ORDER BY 1;
-
-
-
-
--- Run in Databricks
-SELECT 
-    invoice_no, 
-    order_number, 
-    COUNT(*) AS row_count,
-    SUM(sales_amount) AS inflated_sales_amount
-FROM gld_eudm.digital_dashboard_control
-WHERE datasource_num_id = 3000
-GROUP BY invoice_no, order_number
-HAVING COUNT(*) > 1
-ORDER BY row_count DESC;
+SELECT DISTINCT 
+    uof.flex_1 AS raw_flex_1,
+    TRIM(CAST(uof.flex_1 AS STRING)) AS trimmed_flex_1,
+    doc_raw.ent_type AS matched_raw,
+    doc_trimmed.ent_type AS matched_trimmed,
+    doc_trimmed.rollup_category
+FROM brz_teradata.udm_order_fact uof
+-- Test 1: How your notebook currently joins
+LEFT JOIN dim_digital_channel doc_raw 
+    ON doc_raw.ent_type = uof.flex_1 
+    AND doc_raw.datasource_num_id = uof.datasource_num_id
+-- Test 2: How it should join
+LEFT JOIN dim_digital_channel doc_trimmed 
+    ON doc_trimmed.ent_type = TRIM(CAST(uof.flex_1 AS STRING)) 
+    AND CAST(doc_trimmed.datasource_num_id AS INT) = CAST(uof.datasource_num_id AS INT)
+WHERE uof.datasource_num_id = 3000 
+  AND uof.flex_1 IS NOT NULL;
 
 
 
@@ -29,35 +22,5 @@ ORDER BY row_count DESC;
 
 
 
--- Run in Databricks
-SELECT 
-    COUNT(sf.wesnet_order_no) AS total_sales_records,
-    COUNT(uof.sales_order_no) AS successfully_joined_orders,
-    COUNT(CASE WHEN TRIM(CAST(uof.sales_order_no AS STRING)) = TRIM(CAST(sf.wesnet_order_no AS STRING)) THEN 1 END) AS matching_order_no,
-    COUNT(CASE WHEN TRIM(uof.branch_id) = TRIM(sf.branch_id) THEN 1 END) AS matching_branch,
-    COUNT(CASE WHEN TRIM(uof.order_integration_id) = TRIM(sf.order_integration_id) THEN 1 END) AS matching_integration_id
-FROM brz_teradata.udm_sales_fact sf
-LEFT JOIN brz_teradata.udm_order_fact uof 
-    ON TRIM(CAST(uof.sales_order_no AS STRING)) = TRIM(CAST(sf.wesnet_order_no AS STRING))
-WHERE sf.datasource_num_id = 3000 
-  AND sf.date_invoice >= '2022-01-01';
 
 
-
-
-SELECT 
-    invoice_no, 
-    order_number, 
-    ent_type,
-    sbu,
-    COUNT(*) AS row_count,
-    SUM(sales_amount) AS total_sales
-FROM gld_eudm.digital_dashboard_control -- (Use dss_marts for Teradata)
-WHERE datasource_num_id = 3000
-GROUP BY 
-    invoice_no, 
-    order_number,
-    ent_type,
-    sbu
-HAVING COUNT(*) > 1
-ORDER BY row_count DESC;
