@@ -1,18 +1,10 @@
-spark.sql(f"""
-CREATE OR REPLACE TEMPORARY VIEW of_order_fact AS
-SELECT
-    datasource_num_id, 
-    TRIM(sales_order_no) AS sales_order_no, 
-    TRIM(branch_id) AS branch_id, 
-    order_integration_id, 
-    TRIM(flex_1) AS flex_1,
-    TRIM(ent_type) AS ent_type, 
-    TRIM(invoice_no) AS invoice_no, 
-    to_date(date_invoice) AS date_invoice, 
-    WesnetLine, 
-    dl_load_date, 
-    order_updated_ts,
-    TRIM(customer_po_no) AS customer_po_no
-FROM brz_teradata.udm_order_fact
-WHERE datasource_num_id IN (3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12001, 12002, 12003, 12004, 12005, 13000, 14000)
-""")
+ent_type	rollup_category	total_rows	total_sales_amount
+null	null	4956963	13845869538.12
+EDI	Integrations	384738	601612520.17
+Web	Websites	230462	573917793.16
+eStock	Materials Management	102389	151210901.05
+XML	Integrations	48122	236103936.62
+Punchout	Websites	30056	26658775.08
+Conexiom	Integrations	4586	129056.63
+Secura Stock	Materials Management	514	109758.08
+SSPO	Integrations	64	801068.29
