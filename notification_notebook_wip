@@ -1,10 +1,28 @@
-ent_type	rollup_category	total_rows	total_sales_amount
-null	null	4956963	13845869538.12
-EDI	Integrations	384738	601612520.17
-Web	Websites	230462	573917793.16
-eStock	Materials Management	102389	151210901.05
-XML	Integrations	48122	236103936.62
-Punchout	Websites	30056	26658775.08
-Conexiom	Integrations	4586	129056.63
-Secura Stock	Materials Management	514	109758.08
-SSPO	Integrations	64	801068.29
+SELECT ent_type, rollup_category, COUNT(*) 
+FROM dss_marts.digital_dashboard_control
+WHERE datasource_num_id = 3000
+GROUP BY 1, 2;
+
+
+
+
+spark.sql("""
+CREATE OR REPLACE TEMPORARY VIEW dim_digital_channel AS
+SELECT TRIM(ent_type) AS ent_type, datasource_num_id, TRIM(rollup_category) AS rollup_category
+FROM (
+    SELECT ent_type, datasource_num_id, rollup_category,
+    ROW_NUMBER() OVER (
+        PARTITION BY TRIM(ent_type), datasource_num_id -- REMOVED rollup_category
+        ORDER BY updated_ts DESC
+    ) AS rn
+    FROM brz_teradata.udm_digital_channel_code_dim
+) t
+WHERE rn = 1
+""")
+
+
+
+
+
+CAST(CASE WHEN sf.currency = 'USD' THEN 1 ELSE cr.conversion_rate END AS DECIMAL(38,10)) as currency_conversion, 
+CAST(SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) * CASE WHEN sf.currency = 'USD' THEN 1 ELSE cr.conversion_rate END AS DECIMAL(38,12)) as sales_amount_USD,
