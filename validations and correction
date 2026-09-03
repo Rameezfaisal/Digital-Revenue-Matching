@@ -1,9 +1,20 @@
-raw_flex_1	trimmed_flex_1	matched_raw	matched_trimmed	rollup_category
-Punchout	Punchout	Punchout	Punchout	Websites
-eStock	eStock	eStock	eStock	Materials Management
-Web	Web	Web	Web	Websites
-Conexiom	Conexiom	Conexiom	Conexiom	Integrations
-Secura Stock	Secura Stock	Secura Stock	Secura Stock	Materials Management
-EDI	EDI	EDI	EDI	Integrations
-XML	XML	XML	XML	Integrations
-SSPO	SSPO	SSPO	SSPO	Integrations
+SELECT 
+    ent_type, 
+    rollup_category, 
+    COUNT(*) AS total_rows,
+    SUM(sales_amount) AS total_sales_amount
+FROM gld_eudm.digital_dashboard_control
+WHERE datasource_num_id = 3000
+GROUP BY ent_type, rollup_category
+ORDER BY total_rows DESC;
+
+
+
+
+
+SELECT 
+    COUNT(*) AS total_wesnet_records,
+    COUNT(CASE WHEN rollup_category IS NULL THEN 1 END) AS null_rollup_category_count,
+    COUNT(CASE WHEN ent_type IS NULL THEN 1 END) AS null_ent_type_count
+FROM gld_eudm.digital_dashboard_control
+WHERE datasource_num_id = 3000;
