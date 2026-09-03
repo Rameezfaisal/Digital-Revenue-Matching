@@ -1,20 +1,31 @@
-SELECT 
-    ent_type, 
-    rollup_category, 
-    COUNT(*) AS total_rows,
-    SUM(sales_amount) AS total_sales_amount
-FROM gld_eudm.digital_dashboard_control
-WHERE datasource_num_id = 3000
-GROUP BY ent_type, rollup_category
-ORDER BY total_rows DESC;
+in teradata:
+
+(
+select distinct doc.rollup_category
+from dss_marts.udm_digital_channel_code_dim doc
+where doc.ent_type= uof.flex_1
+and doc.datasource_num_id=uof.datasource_num_id
+)
 
 
+in my notebooks its:
+
+LEFT JOIN dim_digital_channel doc
+ON doc.ent_type=uof.flex_1
+AND doc.datasource_num_id=uof.datasource_num_id
 
 
+in teradata:
 
-SELECT 
-    COUNT(*) AS total_wesnet_records,
-    COUNT(CASE WHEN rollup_category IS NULL THEN 1 END) AS null_rollup_category_count,
-    COUNT(CASE WHEN ent_type IS NULL THEN 1 END) AS null_ent_type_count
-FROM gld_eudm.digital_dashboard_control
-WHERE datasource_num_id = 3000;
+case
+when sf.currency='USD' then 1
+else (
+   select conversion_rate ...
+)
+end
+
+
+in my notebooks its:
+
+coalesce(cr.conversion_rate,1)
+
