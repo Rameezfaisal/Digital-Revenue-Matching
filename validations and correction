@@ -1,31 +1,41 @@
-in teradata:
-
-(
-select distinct doc.rollup_category
-from dss_marts.udm_digital_channel_code_dim doc
-where doc.ent_type= uof.flex_1
-and doc.datasource_num_id=uof.datasource_num_id
-)
-
-
-in my notebooks its:
-
-LEFT JOIN dim_digital_channel doc
-ON doc.ent_type=uof.flex_1
-AND doc.datasource_num_id=uof.datasource_num_id
+SELECT 
+    rollup_category,
+    SUM(total_no_of_sales) AS total_no_of_sales,
+    ROUND(SUM(sales_amount_usd), 2) AS digital_revenue_usd
+FROM gld_eudm.digital_dashboard_control_summary
+WHERE datasource_num_id = 3000
+  AND month_of_year = '2025-05'
+GROUP BY rollup_category
+ORDER BY digital_revenue_usd DESC;
 
 
-in teradata:
-
-case
-when sf.currency='USD' then 1
-else (
-   select conversion_rate ...
-)
-end
 
 
-in my notebooks its:
 
-coalesce(cr.conversion_rate,1)
+SELECT 
+    COALESCE(sbu, 'TOTAL') AS sbu,
+    ROUND(SUM(CASE WHEN rollup_category = 'Materials Management' THEN sales_amount_USD ELSE 0 END), 2) AS materials_management_rev,
+    ROUND(SUM(sales_amount_USD), 2) AS total_digital_revenue,
+    ROUND(SUM(CASE WHEN rollup_category = 'Integrations' THEN sales_amount_USD ELSE 0 END), 2) AS integrations_rev,
+    ROUND(SUM(CASE WHEN rollup_category = 'Websites' THEN sales_amount_USD ELSE 0 END), 2) AS websites_rev
+FROM gld_eudm.digital_dashboard_control
+WHERE datasource_num_id = 3000
+  AND date_invoice >= '2025-05-01' 
+  AND date_invoice <= '2025-05-31'
+GROUP BY GROUPING SETS ((sbu), ())
+ORDER BY sbu;
+
+
+
+
+
+SELECT 
+    COUNT(DISTINCT order_number) AS distinct_digital_orders,
+    SUM(total_no_of_sales) AS total_sales_metric
+FROM gld_eudm.digital_dashboard_control
+WHERE datasource_num_id = 3000
+  AND date_invoice >= '2025-05-01' 
+  AND date_invoice <= '2025-05-31';
+
+
 
