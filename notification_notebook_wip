@@ -6,9 +6,22 @@ Websites	998062	989267463.24
 Integrations	1027968	759750175.27
 Materials Management	483169	229987722.46
 
+The second query output is 
 
-It can be due to:
+sbu	materials_management_rev	total_digital_revenue	integrations_rev	websites_rev
+CORP	0.00	3384543.88	0.00	0.00
+CSS	0.00	366143197.30	181165455.10	164961359.50
+EES	49828665.70	3583565523.25	210443787.31	188432879.04
+TOTAL	229987722.46	5976634304.79	759750175.27	989267463.24
+UBS	180159056.76	2023541040.36	368140932.86	635873224.70
 
+Third query output is 
+
+distinct_digital_orders	total_sales_metric
+140801	8951607
+
+
+Can it be due to:
 my colleague told me that they do a full reload on the data in bronze once a while to check this use this query and take the cdc_value for the one which have highest count
 
 	WITH get_snapshot AS (
@@ -44,4 +57,4 @@ datasource_num_id	dl_load_date	record_count
 3000	2024-04-20T16:13:42.737+00:00	140547696
 
 
-so i thing i should change my cdc_value to 2026-02-14T03:42:30.564+00:00   before running my notebook for the first time in UAT if there anything else i need to do pls tell
+so should i change my cdc_value to 2026-02-14T03:42:30.564+00:00   before running my notebook for the first time in UAT if there anything else i need to do pls tell or need to validate anything before changing the cdc_value before first run.
