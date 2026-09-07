@@ -1,15 +1,15 @@
 The first query you provided giving me this output 
 
 rollup_category	total_no_of_sales	digital_revenue_usd
-null	1288072	892397762.62
-Websites	179020	178198131.10
-Integrations	209874	171460458.81
-Materials Management	157074	79655077.57
+null	6024641	4030149045.40
+Websites	998062	989267463.24
+Integrations	1027968	759750175.27
+Materials Management	483169	229987722.46
 
 
 It can be due to:
 
-my colleague told me that they do a full reload on the data in bronze once a while to check this use this query
+my colleague told me that they do a full reload on the data in bronze once a while to check this use this query and take the cdc_value for the one which have highest count
 
 	WITH get_snapshot AS (
 		SELECT datasource_num_id, dl_load_date, record_count
@@ -37,11 +37,11 @@ my colleague told me that they do a full reload on the data in bronze once a whi
 when i used it this is the output
 
 datasource_num_id	dl_load_date	record_count
-3000	2026-02-14T03:42:30.564+00:00	174853305
-3000	2024-04-02T13:45:11.614+00:00	20235314
-3000	2025-10-30T13:24:28.076+00:00	15635827
-3000	2024-12-05T15:46:27.061+00:00	14454122
-3000	2024-10-13T07:14:59.640+00:00	14149586
+3000	2025-11-05T02:37:00.836+00:00	174521740
+3000	2025-06-18T01:18:40.240+00:00	166391045
+3000	2025-06-14T10:22:54.702+00:00	166274571
+3000	2024-06-15T20:29:21.763+00:00	140547696
+3000	2024-04-20T16:13:42.737+00:00	140547696
 
 
 so i thing i should change my cdc_value to 2026-02-14T03:42:30.564+00:00   before running my notebook for the first time in UAT if there anything else i need to do pls tell
