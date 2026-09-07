@@ -1,28 +1,47 @@
-SELECT ent_type, rollup_category, COUNT(*) 
-FROM dss_marts.digital_dashboard_control
-WHERE datasource_num_id = 3000
-GROUP BY 1, 2;
+The first query you provided giving me this output 
+
+rollup_category	total_no_of_sales	digital_revenue_usd
+null	1288072	892397762.62
+Websites	179020	178198131.10
+Integrations	209874	171460458.81
+Materials Management	157074	79655077.57
+
+
+It can be due to:
+
+my colleague told me that they do a full reload on the data in bronze once a while to check this use this query
+
+	WITH get_snapshot AS (
+		SELECT datasource_num_id, dl_load_date, record_count
+		FROM (
+			SELECT
+				datasource_num_id,
+				dl_load_date,
+				COUNT(*) AS record_count,
+				ROW_NUMBER() OVER (
+					PARTITION BY datasource_num_id
+					ORDER BY COUNT(*) DESC
+				) AS rn
+			FROM brz_teradata.udm_sales_fact
+			WHERE cast(dl_load_date as date) >= '2023-01-01'
+			  AND datasource_num_id = 3000
+			GROUP BY datasource_num_id, dl_load_date
+		)
+		WHERE rn < 6
+	)
+	SELECT *
+	FROM get_snapshot;
 
 
 
+when i used it this is the output
 
-spark.sql("""
-CREATE OR REPLACE TEMPORARY VIEW dim_digital_channel AS
-SELECT TRIM(ent_type) AS ent_type, datasource_num_id, TRIM(rollup_category) AS rollup_category
-FROM (
-    SELECT ent_type, datasource_num_id, rollup_category,
-    ROW_NUMBER() OVER (
-        PARTITION BY TRIM(ent_type), datasource_num_id -- REMOVED rollup_category
-        ORDER BY updated_ts DESC
-    ) AS rn
-    FROM brz_teradata.udm_digital_channel_code_dim
-) t
-WHERE rn = 1
-""")
+datasource_num_id	dl_load_date	record_count
+3000	2026-02-14T03:42:30.564+00:00	174853305
+3000	2024-04-02T13:45:11.614+00:00	20235314
+3000	2025-10-30T13:24:28.076+00:00	15635827
+3000	2024-12-05T15:46:27.061+00:00	14454122
+3000	2024-10-13T07:14:59.640+00:00	14149586
 
 
-
-
-
-CAST(CASE WHEN sf.currency = 'USD' THEN 1 ELSE cr.conversion_rate END AS DECIMAL(38,10)) as currency_conversion, 
-CAST(SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) * CASE WHEN sf.currency = 'USD' THEN 1 ELSE cr.conversion_rate END AS DECIMAL(38,12)) as sales_amount_USD,
+so i thing i should change my cdc_value to 2026-02-14T03:42:30.564+00:00   before running my notebook for the first time in UAT if there anything else i need to do pls tell
