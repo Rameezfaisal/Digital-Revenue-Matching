@@ -1,60 +1,23 @@
+After changing the sf_sales_fact view code 
+
 The first query you provided giving me this output 
 
 rollup_category	total_no_of_sales	digital_revenue_usd
-null	6024641	4030149045.40
-Websites	998062	989267463.24
-Integrations	1027968	759750175.27
-Materials Management	483169	229987722.46
+null	427037	377599792.72
+Websites	91412	97763679.38
+Integrations	99643	75011559.17
+Materials Management	43420	22374348.68
 
 The second query output is 
 
 sbu	materials_management_rev	total_digital_revenue	integrations_rev	websites_rev
-CORP	0.00	3384543.88	0.00	0.00
-CSS	0.00	366143197.30	181165455.10	164961359.50
-EES	49828665.70	3583565523.25	210443787.31	188432879.04
-TOTAL	229987722.46	5976634304.79	759750175.27	989267463.24
-UBS	180159056.76	2023541040.36	368140932.86	635873224.70
+CORP	0.00	578802.58	0.00	0.00
+CSS	0.00	38478825.50	18051147.69	16355214.32
+EES	4355242.04	325035390.01	19395566.13	16993290.01
+TOTAL	22374469.30	570925592.74	75012248.02	97765488.70
+UBS	18019227.26	206832574.65	37565534.20	64416984.37
 
 Third query output is 
 
 distinct_digital_orders	total_sales_metric
-140801	8951607
-
-
-Can it be due to:
-my colleague told me that they do a full reload on the data in bronze once a while to check this use this query and take the cdc_value for the one which have highest count
-
-	WITH get_snapshot AS (
-		SELECT datasource_num_id, dl_load_date, record_count
-		FROM (
-			SELECT
-				datasource_num_id,
-				dl_load_date,
-				COUNT(*) AS record_count,
-				ROW_NUMBER() OVER (
-					PARTITION BY datasource_num_id
-					ORDER BY COUNT(*) DESC
-				) AS rn
-			FROM brz_teradata.udm_sales_fact
-			WHERE cast(dl_load_date as date) >= '2023-01-01'
-			  AND datasource_num_id = 3000
-			GROUP BY datasource_num_id, dl_load_date
-		)
-		WHERE rn < 6
-	)
-	SELECT *
-	FROM get_snapshot;
-
-
-
-when i used it this is the output
-
-datasource_num_id	dl_load_date	record_count
-3000	2025-11-05T02:37:00.836+00:00	174521740
-3000	2025-06-18T01:18:40.240+00:00	166391045
-3000	2025-06-14T10:22:54.702+00:00	166274571
-3000	2024-06-15T20:29:21.763+00:00	140547696
-3000	2024-04-20T16:13:42.737+00:00	140547696
-
-
-so should i change my cdc_value to 2026-02-14T03:42:30.564+00:00   before running my notebook for the first time in UAT if there anything else i need to do pls tell or need to validate anything before changing the cdc_value before first run.
+132501	681971
