@@ -1,23 +1,20 @@
-After changing the sf_sales_fact view code 
+After using the new partitioned of_order_fact view code 
 
 The first query you provided giving me this output 
 
 rollup_category	total_no_of_sales	digital_revenue_usd
-null	427037	377599792.72
-Websites	91412	97763679.38
-Integrations	99643	75011559.17
-Materials Management	43420	22374348.68
+null	584912	506344818.96
 
 The second query output is 
 
 sbu	materials_management_rev	total_digital_revenue	integrations_rev	websites_rev
-CORP	0.00	578802.58	0.00	0.00
-CSS	0.00	38478825.50	18051147.69	16355214.32
-EES	4355242.04	325035390.01	19395566.13	16993290.01
-TOTAL	22374469.30	570925592.74	75012248.02	97765488.70
-UBS	18019227.26	206832574.65	37565534.20	64416984.37
+CORP	0.00	588758.74	0.00	0.00
+CSS	0.00	21642604.21	0.00	0.00
+EES	0.00	312432158.89	0.00	0.00
+TOTAL	0.00	504671667.11	0.00	0.00
+UBS	0.00	170008145.27	0.00	0.00
 
 Third query output is 
 
 distinct_digital_orders	total_sales_metric
-132501	681971
+132114	614938
