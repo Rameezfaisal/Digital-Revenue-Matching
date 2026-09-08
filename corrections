@@ -1,29 +1,3 @@
-why cant i use this code for of_order_fact view
-
-spark.sql(f"""
-CREATE OR REPLACE TEMPORARY VIEW of_order_fact AS
-SELECT DISTINCT
-    datasource_num_id, 
-    TRIM(sales_order_no) AS sales_order_no, 
-    TRIM(branch_id) AS branch_id, 
-    TRIM(order_integration_id) AS order_integration_id,
-    TRIM(flex_1) AS flex_1,
-    TRIM(ent_type) AS ent_type, 
-    TRIM(invoice_no) AS invoice_no, 
-    to_date(date_invoice) AS date_invoice, 
-    WesnetLine, 
-    dl_load_date, 
-    order_updated_ts,
-    TRIM(customer_po_no) AS customer_po_no
-FROM brz_teradata.udm_order_fact
-WHERE datasource_num_id IN (3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12001, 12002, 12003, 12004, 12005, 13000, 14000)
-""")
-
-
-
-and this for main_df 
-
-
 main_df = spark.sql(f"""
 WITH base_incremental_sales AS (
     SELECT * FROM sf_sales_fact
@@ -39,13 +13,18 @@ SELECT * FROM (
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
     LEFT JOIN (
-        SELECT DISTINCT sales_order_no, branch_id, datasource_num_id, order_integration_id, flex_1 
-        FROM of_order_fact
+        SELECT sales_order_no, branch_id, datasource_num_id, order_integration_id, flex_1
+        FROM (
+            SELECT sales_order_no, branch_id, datasource_num_id, order_integration_id, flex_1,
+                   ROW_NUMBER() OVER (PARTITION BY datasource_num_id, sales_order_no, branch_id, order_integration_id ORDER BY dl_load_date DESC, order_updated_ts DESC) AS rn
+            FROM brz_teradata.udm_order_fact
+            WHERE datasource_num_id = 3000
+        ) WHERE rn = 1
     ) uof ON (
         CAST(uof.sales_order_no AS STRING) = CAST(sf.wesnet_order_no AS STRING) 
         AND CAST(uof.datasource_num_id AS INT) = CAST(sf.datasource_num_id AS INT) 
         AND TRIM(CAST(uof.branch_id AS STRING)) = TRIM(CAST(sf.branch_id AS STRING)) 
-        AND CAST(uof.order_integration_id AS STRING) = CAST(sf.order_integration_id AS STRING)
+        AND TRIM(CAST(uof.order_integration_id AS STRING)) = TRIM(CAST(sf.order_integration_id AS STRING))
     )
     LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id 
     LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.flex_1 AND doc.datasource_num_id = uof.datasource_num_id)
@@ -66,9 +45,13 @@ SELECT * FROM (
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
     LEFT JOIN (
-        SELECT DISTINCT ent_type, sales_order_no, branch_id 
-        FROM of_order_fact
-        WHERE datasource_num_id = 5000
+        SELECT ent_type, sales_order_no, branch_id 
+        FROM (
+            SELECT ent_type, sales_order_no, branch_id,
+                   ROW_NUMBER() OVER (PARTITION BY datasource_num_id, sales_order_no, branch_id ORDER BY dl_load_date DESC, order_updated_ts DESC) AS rn
+            FROM brz_teradata.udm_order_fact
+            WHERE datasource_num_id = 5000
+        ) WHERE rn = 1
     ) uof ON (
         CAST(uof.sales_order_no AS STRING) = CAST(sf.order_number AS STRING) 
         AND TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING))
@@ -91,8 +74,13 @@ SELECT * FROM (
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
     LEFT JOIN (
-        SELECT DISTINCT sales_order_no, datasource_num_id, branch_id, ent_type 
-        FROM of_order_fact
+        SELECT sales_order_no, datasource_num_id, branch_id, ent_type 
+        FROM (
+            SELECT sales_order_no, datasource_num_id, branch_id, ent_type,
+                   ROW_NUMBER() OVER (PARTITION BY datasource_num_id, sales_order_no ORDER BY dl_load_date DESC, order_updated_ts DESC) AS rn
+            FROM brz_teradata.udm_order_fact
+            WHERE datasource_num_id = 9000
+        ) WHERE rn = 1
     ) uof ON (
         CAST(uof.sales_order_no AS STRING) = CAST(sf.order_number AS STRING) 
         AND CAST(uof.datasource_num_id AS INT) = CAST(sf.datasource_num_id AS INT)
@@ -115,10 +103,14 @@ SELECT * FROM (
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
     LEFT JOIN (
-        SELECT DISTINCT ent_type, sales_order_no, branch_id 
-        FROM of_order_fact
-        WHERE datasource_num_id = 13000 
-          AND ent_type IN (SELECT doc2.ent_type FROM dim_digital_channel doc2 WHERE doc2.datasource_num_id = 13000 AND doc2.rollup_category IN ('Websites','Materials Management','Integrations'))
+        SELECT ent_type, sales_order_no, branch_id 
+        FROM (
+            SELECT ent_type, sales_order_no, branch_id,
+                   ROW_NUMBER() OVER (PARTITION BY datasource_num_id, sales_order_no, branch_id ORDER BY dl_load_date DESC, order_updated_ts DESC) AS rn
+            FROM brz_teradata.udm_order_fact
+            WHERE datasource_num_id = 13000 
+              AND ent_type IN (SELECT doc2.ent_type FROM dim_digital_channel doc2 WHERE doc2.datasource_num_id = 13000 AND doc2.rollup_category IN ('Websites','Materials Management','Integrations'))
+        ) WHERE rn = 1
     ) uof ON (
         CAST(uof.sales_order_no AS STRING) = CAST(sf.order_number AS STRING) 
         AND TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING))
@@ -141,11 +133,15 @@ SELECT * FROM (
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
     LEFT JOIN (
-        SELECT DISTINCT ent_type, sales_order_no, branch_id, WesnetLine 
-        FROM of_order_fact
-        WHERE datasource_num_id = 11000
+        SELECT ent_type, sales_order_no, branch_id, WesnetLine 
+        FROM (
+            SELECT ent_type, sales_order_no, branch_id, WesnetLine,
+                   ROW_NUMBER() OVER (PARTITION BY datasource_num_id, sales_order_no, branch_id, WesnetLine ORDER BY dl_load_date DESC, order_updated_ts DESC) AS rn
+            FROM brz_teradata.udm_order_fact
+            WHERE datasource_num_id = 11000
+        ) WHERE rn = 1
     ) uof ON (
-        CAST(uof.sales_order_no AS STRING) = CAST(sf.order_number AS STRING) 
+        TRIM(CAST(uof.sales_order_no AS STRING)) = TRIM(CAST(sf.order_number AS STRING)) 
         AND TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING)) 
         AND CAST(uof.WesnetLine AS STRING) = CAST(sf.invoice_line_no AS STRING)
     )
@@ -167,9 +163,13 @@ SELECT * FROM (
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
     LEFT JOIN (
-        SELECT DISTINCT ent_type, sales_order_no, branch_id 
-        FROM of_order_fact
-        WHERE datasource_num_id = 14000
+        SELECT ent_type, sales_order_no, branch_id 
+        FROM (
+            SELECT ent_type, sales_order_no, branch_id,
+                   ROW_NUMBER() OVER (PARTITION BY datasource_num_id, sales_order_no, branch_id ORDER BY dl_load_date DESC, order_updated_ts DESC) AS rn
+            FROM brz_teradata.udm_order_fact
+            WHERE datasource_num_id = 14000
+        ) WHERE rn = 1
     ) uof ON (
         CAST(uof.sales_order_no AS STRING) = CAST(sf.order_number AS STRING) 
         AND TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING))
@@ -192,9 +192,13 @@ SELECT * FROM (
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
     LEFT JOIN (
-        SELECT DISTINCT ent_type, sales_order_no, branch_id 
-        FROM of_order_fact
-        WHERE datasource_num_id = 10000
+        SELECT ent_type, sales_order_no, branch_id 
+        FROM (
+            SELECT ent_type, sales_order_no, branch_id,
+                   ROW_NUMBER() OVER (PARTITION BY datasource_num_id, sales_order_no, branch_id ORDER BY dl_load_date DESC, order_updated_ts DESC) AS rn
+            FROM brz_teradata.udm_order_fact
+            WHERE datasource_num_id = 10000
+        ) WHERE rn = 1
     ) uof ON (
         CAST(sf.order_number AS STRING) = CAST(uof.sales_order_no AS STRING) 
         AND TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING))
@@ -217,9 +221,13 @@ SELECT * FROM (
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
     LEFT JOIN (
-        SELECT DISTINCT ent_type, sales_order_no, flex_1 
-        FROM of_order_fact
-        WHERE datasource_num_id = 4000
+        SELECT ent_type, sales_order_no, flex_1 
+        FROM (
+            SELECT ent_type, sales_order_no, flex_1,
+                   ROW_NUMBER() OVER (PARTITION BY datasource_num_id, sales_order_no, flex_1 ORDER BY dl_load_date DESC, order_updated_ts DESC) AS rn
+            FROM brz_teradata.udm_order_fact
+            WHERE datasource_num_id = 4000
+        ) WHERE rn = 1
     ) uof ON (
         CAST(sf.order_number AS STRING) = CAST(uof.sales_order_no AS STRING) 
         AND CAST(sf.flex_1 AS STRING) = CAST(uof.flex_1 AS STRING)
@@ -242,8 +250,13 @@ SELECT * FROM (
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
     LEFT JOIN (
-        SELECT DISTINCT ent_type, sales_order_no, branch_id, datasource_num_id, invoice_no 
-        FROM of_order_fact
+        SELECT ent_type, sales_order_no, branch_id, datasource_num_id, invoice_no 
+        FROM (
+            SELECT ent_type, sales_order_no, branch_id, datasource_num_id, invoice_no,
+                   ROW_NUMBER() OVER (PARTITION BY datasource_num_id, sales_order_no, branch_id, invoice_no ORDER BY dl_load_date DESC, order_updated_ts DESC) AS rn
+            FROM brz_teradata.udm_order_fact
+            WHERE datasource_num_id IN (6000, 7000, 8000)
+        ) WHERE rn = 1
     ) uof ON (
         CAST(uof.sales_order_no AS STRING) = CAST(sf.wesnet_order_no AS STRING) 
         AND TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING)) 
@@ -269,17 +282,21 @@ SELECT * FROM (
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
     LEFT JOIN (
-        SELECT DISTINCT ent_type, 
-        CASE 
-            WHEN trim(ent_type) = 'EDI' THEN 'EDI Sales' 
-            WHEN ent_type = 'WOE' THEN 'Web Order Entry (WOE)' 
-            WHEN ent_type = 'MBAS' THEN 'Virtual Warehouse' 
-            WHEN ent_type = 'CRM' THEN 'Vending Machines' 
-            WHEN ent_type = 'Manual' AND customer_po_no = 'CRIBMASTER' THEN 'Vending Machines' 
-            ELSE ent_type 
-        END as ent_type1, 
-        sales_order_no, branch_id, datasource_num_id, invoice_no, date_invoice 
-        FROM of_order_fact
+        SELECT ent_type1, sales_order_no, branch_id, datasource_num_id, invoice_no, date_invoice 
+        FROM (
+            SELECT CASE 
+                    WHEN trim(ent_type) = 'EDI' THEN 'EDI Sales' 
+                    WHEN ent_type = 'WOE' THEN 'Web Order Entry (WOE)' 
+                    WHEN ent_type = 'MBAS' THEN 'Virtual Warehouse' 
+                    WHEN ent_type = 'CRM' THEN 'Vending Machines' 
+                    WHEN ent_type = 'Manual' AND customer_po_no = 'CRIBMASTER' THEN 'Vending Machines' 
+                    ELSE ent_type 
+                   END as ent_type1, 
+                   sales_order_no, branch_id, datasource_num_id, invoice_no, date_invoice,
+                   ROW_NUMBER() OVER (PARTITION BY datasource_num_id, sales_order_no, invoice_no ORDER BY dl_load_date DESC, order_updated_ts DESC) AS rn
+            FROM brz_teradata.udm_order_fact
+            WHERE datasource_num_id = 12001
+        ) WHERE rn = 1
     ) uof ON (
         CAST(uof.sales_order_no AS STRING) = CAST(sf.order_number AS STRING) 
         AND trim(concat(CAST(uof.sales_order_no AS STRING), '.', CAST(uof.invoice_no AS STRING))) = CAST(sf.invoice_no AS STRING)
@@ -303,8 +320,13 @@ SELECT * FROM (
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
     LEFT JOIN (
-        SELECT DISTINCT ent_type, sales_order_no, branch_id, datasource_num_id, invoice_no, date_invoice 
-        FROM of_order_fact
+        SELECT ent_type, sales_order_no, branch_id, datasource_num_id, invoice_no, date_invoice 
+        FROM (
+            SELECT ent_type, sales_order_no, branch_id, datasource_num_id, invoice_no, date_invoice,
+                   ROW_NUMBER() OVER (PARTITION BY datasource_num_id, sales_order_no, branch_id, date_invoice, invoice_no ORDER BY dl_load_date DESC, order_updated_ts DESC) AS rn
+            FROM brz_teradata.udm_order_fact
+            WHERE datasource_num_id IN (12002, 12003, 12004)
+        ) WHERE rn = 1
     ) uof ON (
         TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING)) 
         AND CAST(uof.datasource_num_id AS INT) = CAST(sf.datasource_num_id AS INT) 
@@ -330,12 +352,17 @@ SELECT * FROM (
     current_date() as CREATE_DATE
     FROM base_incremental_sales sf
     LEFT JOIN (
-        SELECT DISTINCT ent_type, sales_order_no, branch_id, datasource_num_id, invoice_no, date_invoice 
-        FROM of_order_fact
+        SELECT ent_type, sales_order_no, branch_id, datasource_num_id, invoice_no, date_invoice 
+        FROM (
+            SELECT ent_type, sales_order_no, branch_id, datasource_num_id, invoice_no, date_invoice,
+                   ROW_NUMBER() OVER (PARTITION BY datasource_num_id, sales_order_no, branch_id ORDER BY dl_load_date DESC, order_updated_ts DESC) AS rn
+            FROM brz_teradata.udm_order_fact
+            WHERE datasource_num_id = 12005
+        ) WHERE rn = 1
     ) uof ON (
         TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING)) 
         AND CAST(uof.datasource_num_id AS INT) = CAST(sf.datasource_num_id AS INT) 
-        AND CAST(uof.sales_order_no AS STRING) = CAST(sf.order_number AS STRING)
+        AND TRIM(CAST(uof.sales_order_no AS STRING)) = TRIM(CAST(sf.order_number AS STRING))
     )
     LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id 
     LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id) 
