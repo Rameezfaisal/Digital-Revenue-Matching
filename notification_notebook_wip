@@ -1,23 +1,23 @@
-After using the new main_df code the UAT output is 
+After using the new sf_sales_fact view code which uses rank() the UAT output is 
 
 The first query you provided giving me this output 
 
 rollup_category	total_no_of_sales	digital_revenue_usd
-null	422044	360106867.00
-Integrations	90011	71227793.24
-Websites	35576	53069467.20
-Materials Management	43188	22380925.69
+null	608641	391953337.16
+Integrations	93308	73234957.14
+Websites	40993	55102009.54
+Materials Management	49295	23500317.83
 
 The second query output is 
 
 sbu	materials_management_rev	total_digital_revenue	integrations_rev	websites_rev
-CORP	0.00	583628.70	0.00	0.00
-CSS	0.00	21640721.45	18051147.69	3514.20
-EES	4372446.57	312317888.60	17504923.38	11733625.84
-TOTAL	22380925.69	504602999.07	71228507.57	53071291.20
-UBS	18008479.12	170060760.32	35672436.50	41334151.16
+CORP	0.00	383949.57	0.00	0.00
+CSS	0.00	19844522.54	18051147.69	3514.20
+EES	5133018.73	352992409.03	19255362.33	13052874.61
+TOTAL	23500317.83	543115822.79	73234957.14	55102009.54
+UBS	18367299.10	169894941.65	35928447.12	42045620.73
 
 Third query output is 
 
 distinct_digital_orders	total_sales_metric
-132482	608953
+140711	797030
