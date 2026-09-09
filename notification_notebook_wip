@@ -1,20 +1,23 @@
-After using the new partitioned of_order_fact view code 
+After using the new main_df code the UAT output is 
 
 The first query you provided giving me this output 
 
 rollup_category	total_no_of_sales	digital_revenue_usd
-null	584912	506344818.96
+null	422044	360106867.00
+Integrations	90011	71227793.24
+Websites	35576	53069467.20
+Materials Management	43188	22380925.69
 
 The second query output is 
 
 sbu	materials_management_rev	total_digital_revenue	integrations_rev	websites_rev
-CORP	0.00	588758.74	0.00	0.00
-CSS	0.00	21642604.21	0.00	0.00
-EES	0.00	312432158.89	0.00	0.00
-TOTAL	0.00	504671667.11	0.00	0.00
-UBS	0.00	170008145.27	0.00	0.00
+CORP	0.00	583628.70	0.00	0.00
+CSS	0.00	21640721.45	18051147.69	3514.20
+EES	4372446.57	312317888.60	17504923.38	11733625.84
+TOTAL	22380925.69	504602999.07	71228507.57	53071291.20
+UBS	18008479.12	170060760.32	35672436.50	41334151.16
 
 Third query output is 
 
 distinct_digital_orders	total_sales_metric
-132114	614938
+132482	608953
