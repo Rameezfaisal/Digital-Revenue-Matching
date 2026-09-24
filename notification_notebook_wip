@@ -1,23 +1,5 @@
-After using the new sf_sales_fact view code which uses rank() the UAT output is 
-
-The first query you provided giving me this output 
-
-rollup_category	total_no_of_sales	digital_revenue_usd
-null	608641	391953337.16
-Integrations	93308	73234957.14
-Websites	40993	55102009.54
-Materials Management	49295	23500317.83
-
-The second query output is 
-
-sbu	materials_management_rev	total_digital_revenue	integrations_rev	websites_rev
-CORP	0.00	383949.57	0.00	0.00
-CSS	0.00	19844522.54	18051147.69	3514.20
-EES	5133018.73	352992409.03	19255362.33	13052874.61
-TOTAL	23500317.83	543115822.79	73234957.14	55102009.54
-UBS	18367299.10	169894941.65	35928447.12	42045620.73
-
-Third query output is 
-
-distinct_digital_orders	total_sales_metric
-140711	797030
+    ) uof ON (
+        TRIM(REGEXP_REPLACE(CAST(uof.sales_order_no AS STRING), '\\.0+$', '')) = TRIM(REGEXP_REPLACE(CAST(sf.order_number AS STRING), '\\.0+$', '')) 
+        AND TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING)) 
+        AND TRIM(REGEXP_REPLACE(CAST(uof.WesnetLine AS STRING), '\\.0+$', '')) = TRIM(REGEXP_REPLACE(CAST(sf.invoice_line_no AS STRING), '\\.0+$', ''))
+    )
