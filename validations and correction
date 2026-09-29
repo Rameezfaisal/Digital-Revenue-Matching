@@ -1,87 +1,14 @@
-spark.sql(f"""
-CREATE OR REPLACE TEMPORARY VIEW sf_sales_fact AS
-SELECT * FROM (
-    SELECT
-        *,
-        RANK() OVER (
-            PARTITION BY 
-                datasource_num_id, 
-                invoice_no, 
-                order_number, 
-                branch_id, 
-                COALESCE(invoice_line_no, concat(CAST(sales_amount AS STRING), CAST(quantity AS STRING)))
-            ORDER BY dl_load_date DESC, updated_ts DESC
-        ) AS rnk
-    FROM (
-        SELECT
-            datasource_num_id, 
-            TRIM(CAST(branch_id AS STRING)) AS branch_id, 
-            to_date(date_invoice) AS date_invoice, 
-            sales_amount, 
-            currency, 
-            customer_dim_key,
-            TRIM(REGEXP_REPLACE(CAST(invoice_no AS STRING), '[.]0+$', '')) AS invoice_no, 
-            TRIM(REGEXP_REPLACE(CAST(wesnet_order_no AS STRING), '[.]0+$', '')) AS wesnet_order_no,
-            TRIM(REGEXP_REPLACE(CAST(order_number AS STRING), '[.]0+$', '')) AS order_number, 
-            TRIM(REGEXP_REPLACE(CAST(order_integration_id AS STRING), '[.]0+$', '')) AS order_integration_id,
-            accounting_include_flag,
-            sales_transfer_flag, 
-            kit_component_flag, 
-            TRIM(sim_description) AS sim_description, 
-            TRIM(inventory_org_code) AS inventory_org_code,
-            cost_amount, 
-            quantity, 
-            market_cost,
-            TRIM(transaction_type) AS transaction_type, 
-            TRIM(REGEXP_REPLACE(CAST(invoice_line_no AS STRING), '[.]0+$', '')) AS invoice_line_no, 
-            conversion_rate,
-            budget_conversion_rate, 
-            TRIM(flex_1) AS flex_1, 
-            dl_load_date, 
-            updated_ts
-        FROM brz_teradata.udm_sales_fact
-        WHERE dl_load_date > '{min_cdc_value}'
-            AND to_date(date_invoice) >= '2024-01-01' 
-            AND datasource_num_id IN (3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12001, 12002, 12003, 12004, 12005, 13000, 14000)
-    )
-)
-WHERE rnk = 1
-""")
+import json
+from datetime import datetime
 
-spark.sql(f"""
-CREATE OR REPLACE TEMPORARY VIEW dim_customer AS
-SELECT * FROM (
-    SELECT
-        customer_dim_key, 
-        TRIM(CAST(customer_no AS STRING)) AS customer_no, 
-        TRIM(CAST(customer_name AS STRING)) AS customer_name, 
-        intercompany_customer,
-        national_acct_no, 
-        dl_load_date, 
-        updated_ts,
-        row_number() OVER (
-            PARTITION BY customer_dim_key
-            ORDER BY dl_load_date DESC, updated_ts DESC, intercompany_customer ASC, TRIM(CAST(customer_name AS STRING)) DESC, TRIM(CAST(customer_no AS STRING)) DESC
-        ) AS row_num
-    FROM brz_teradata.udm_customer_dim
-)
-WHERE row_num = 1
-""")
-
-spark.sql(f"""
-CREATE OR REPLACE TEMPORARY VIEW dim_branch AS
-SELECT * FROM (
-    SELECT 
-        TRIM(CAST(branch_id AS STRING)) AS branch_id, 
-        sbu, 
-        updated_ts,
-        row_number() OVER (
-            PARTITION BY TRIM(CAST(branch_id AS STRING))
-            ORDER BY updated_ts DESC, sbu DESC
-        ) AS row_num
-    FROM brz_teradata.branch_dim
-)
-WHERE row_num = 1
-""")
-
-
+# Run only on the 6th of the month (unless a manual full reload 'Y' is triggered)
+if datetime.now().day != 6 and reload != 'Y':
+    print(f"Today is {datetime.now().strftime('%Y-%m-%d')} (not the 6th). Skipping execution.")
+    
+    results = {
+        "Status": "Success",
+        "dq_summary": None,
+        "cdc_value": str(min_cdc_value)
+    }
+    
+    dbutils.notebook.exit(json.dumps(results))
