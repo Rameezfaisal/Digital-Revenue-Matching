@@ -1,14 +1,86 @@
-import json
-from datetime import datetime
+SELECT 
+    DATASOURCE_NUM_ID, 
+    SUM(TOTAL_NO_OF_SALES) AS OVERALL_ORDERS, 
+    SUM(SALES_AMOUNT_USD) AS OVERALL_REVENUE_USD
+FROM dss_marts.digital_dashboard_control_summary
+GROUP BY DATASOURCE_NUM_ID
+ORDER BY DATASOURCE_NUM_ID;
 
-# Run only on the 6th of the month (unless a manual full reload 'Y' is triggered)
-if datetime.now().day != 6 and reload != 'Y':
-    print(f"Today is {datetime.now().strftime('%Y-%m-%d')} (not the 6th). Skipping execution.")
-    
-    results = {
-        "Status": "Success",
-        "dq_summary": None,
-        "cdc_value": str(min_cdc_value)
-    }
-    
-    dbutils.notebook.exit(json.dumps(results))
+
+
+
+
+SELECT 
+    datasource_num_id, 
+    SUM(total_no_of_sales) AS overall_orders, 
+    ROUND(SUM(sales_amount_usd), 2) AS overall_revenue_usd
+FROM gld_eudm.digital_dashboard_control_summary
+GROUP BY datasource_num_id
+ORDER BY datasource_num_id;
+
+
+
+
+
+
+
+SELECT 
+    COALESCE(ROLLUP_CATEGORY, 'Offline/Null') AS CATEGORY, 
+    SUM(TOTAL_NO_OF_SALES) AS CATEGORY_ORDERS, 
+    SUM(SALES_AMOUNT_USD) AS CATEGORY_REVENUE_USD
+FROM dss_marts.digital_dashboard_control_summary
+WHERE DATASOURCE_NUM_ID = 3000 
+  AND MONTH_OF_YEAR = '2025-05'
+GROUP BY ROLLUP_CATEGORY
+ORDER BY CATEGORY_REVENUE_USD DESC;
+
+
+
+
+
+SELECT 
+    COALESCE(rollup_category, 'Offline/Null') AS category, 
+    SUM(total_no_of_sales) AS category_orders, 
+    ROUND(SUM(sales_amount_usd), 2) AS category_revenue_usd
+FROM gld_eudm.digital_dashboard_control_summary
+WHERE datasource_num_id = 3000 
+  AND month_of_year = '2025-05'
+GROUP BY rollup_category
+ORDER BY category_revenue_usd DESC;
+
+
+
+
+
+
+
+
+
+SELECT 
+    MONTH_OF_YEAR, 
+    SUM(TOTAL_NO_OF_SALES) AS MONTHLY_ORDERS, 
+    SUM(SALES_AMOUNT_USD) AS MONTHLY_REVENUE_USD
+FROM dss_marts.digital_dashboard_control_summary
+GROUP BY MONTH_OF_YEAR
+ORDER BY MONTH_OF_YEAR DESC;
+
+
+
+
+
+
+SELECT 
+    month_of_year, 
+    SUM(total_no_of_sales) AS monthly_orders, 
+    ROUND(SUM(sales_amount_usd), 2) AS monthly_revenue_usd
+FROM gld_eudm.digital_dashboard_control_summary
+GROUP BY month_of_year
+ORDER BY month_of_year DESC;
+
+
+
+
+
+
+
+
