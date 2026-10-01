@@ -10,3 +10,18 @@ FROM brz_teradata.udm_sales_fact
 WHERE to_date(date_invoice) BETWEEN '2025-05-01' AND '2025-05-31'
   AND updated_ts > '2025-06-05'
 LIMIT 5;
+
+
+
+
+%sql
+-- Calculate the net dollar amount of late-arriving data drift
+SELECT 
+    datasource_num_id,
+    ROUND(SUM(sales_amount), 2) AS total_variance_dollars,
+    COUNT(*) AS total_late_modified_orders
+FROM brz_teradata.udm_sales_fact
+WHERE to_date(date_invoice) BETWEEN '2025-05-01' AND '2025-05-31'
+  AND updated_ts > '2025-06-05'
+  AND datasource_num_id = 3000
+GROUP BY datasource_num_id;
