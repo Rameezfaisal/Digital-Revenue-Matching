@@ -14,3 +14,21 @@ LIMIT 5;
 
 
 
+
+
+
+%sql
+-- Check how much USD revenue was artificially inflated by missing conversion rates
+SELECT 
+    currency,
+    COUNT(*) as total_orders_affected,
+    ROUND(SUM(sales_amount), 2) as artificially_inflated_usd_total
+FROM gld_eudm.digital_dashboard_control
+WHERE datasource_num_id = 3000
+  AND date_invoice >= '2025-05-01' 
+  AND date_invoice <= '2025-05-31'
+  AND currency != 'USD'
+  AND currency_conversion IS NULL; -- Flags the rows where COALESCE(rate, 1) took over
+
+
+
