@@ -14,38 +14,3 @@ LIMIT 5;
 
 
 
-
-
-%sql
-WITH current_state AS (
-    -- 1. Get the absolute latest version of every May invoice (Current Reality)
-    SELECT sales_amount
-    FROM brz_teradata.udm_sales_fact
-    WHERE to_date(date_invoice) BETWEEN '2025-05-01' AND '2025-05-31'
-      AND datasource_num_id = 3000
-    QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY order_number  -- *Note: Add your line_item column here if orders have multiple lines
-        ORDER BY updated_ts DESC
-    ) = 1
-),
-snapshot_state AS (
-    -- 2. Get the latest version of every May invoice AS OF June 5th (Dashboard Reality)
-    SELECT sales_amount
-    FROM brz_teradata.udm_sales_fact
-    WHERE to_date(date_invoice) BETWEEN '2025-05-01' AND '2025-05-31'
-      AND datasource_num_id = 3000
-      AND updated_ts <= '2025-06-05' -- The cutoff date for the old dashboard
-    QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY order_number  -- *Note: Add your line_item column here if orders have multiple lines
-        ORDER BY updated_ts DESC
-    ) = 1
-)
--- 3. Compare the totals to find the exact difference
-SELECT 
-    ROUND(c.total, 2) AS current_pipeline_total,
-    ROUND(s.total, 2) AS old_dashboard_snapshot_total,
-    ROUND(c.total - s.total, 2) AS exact_variance_dollars
-FROM 
-    (SELECT SUM(sales_amount) AS total FROM current_state) c
-CROSS JOIN 
-    (SELECT SUM(sales_amount) AS total FROM snapshot_state) s;
