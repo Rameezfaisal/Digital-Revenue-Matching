@@ -1,25 +1,8 @@
-First query output is:
+after doing the changes in uof output is:
 
-sbu	ent_type	rollup_category	row_cnt	total_usd
-EES	null	null	145514	315546311.17
-EES	EDI	Integrations	16523	18985332.33
-EES	Web	Websites	5293	11025656.51
-EES	eStock	Materials Management	6112	5106927.44
-EES	Punchout	Websites	2006	2027218.24
-EES	XML	Integrations	43	209582.83
-EES	SSPO	Integrations	36	60447.16
-EES	Secura Stock	Materials Management	63	26091.28
-
-
-second query output is:
-
-flex_1	raw_rows
-null	16762931477
-EDI	2629904595
-Web	1544616203
-eStock	531368171
-XML	452494915
-Punchout	42133768
-Conexiom	4773979
-Secura Stock	1837623
-SSPO	274790
+sbu	materials_management_rev	total_digital_revenue	integrations_rev	websites_rev
+CORP	0.00	383949.57	0.00	0.00
+CSS	0.00	19844522.54	18051147.69	3514.20
+EES	5133018.72	352987566.96	19255362.32	13052874.75
+TOTAL	23500317.82	543110980.72	73234957.13	55102009.68
+UBS	18367299.10	169894941.65	35928447.12	42045620.73
