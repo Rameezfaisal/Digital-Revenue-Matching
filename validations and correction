@@ -89,3 +89,18 @@ WHERE datasource_num_id = 3000
   AND date_invoice BETWEEN DATE '2025-05-01' AND DATE '2025-05-31'
 GROUP BY sbu, rollup_category
 ORDER BY sbu, rollup_category;
+
+
+
+
+
+
+
+%sql
+SELECT 
+    COUNT(*) AS total_rows_in_control,
+    COUNT(DISTINCT concat_ws('|', datasource_num_id, COALESCE(invoice_no,''), COALESCE(order_number,''), COALESCE(sbu,''), COALESCE(cust_name,''))) AS distinct_invoices,
+    ROUND(SUM(sales_amount_USD), 2) AS raw_sum_usd
+FROM gld_eudm.digital_dashboard_control
+WHERE datasource_num_id = 3000
+  AND date_invoice BETWEEN '2025-05-01' AND '2025-05-31';
