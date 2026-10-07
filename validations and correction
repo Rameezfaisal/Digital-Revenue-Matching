@@ -1,31 +1,91 @@
 %sql
+WITH sf_may_2025 AS (
+    SELECT * FROM (
+        SELECT 
+            datasource_num_id, TRIM(branch_id) AS branch_id, to_date(date_invoice) AS date_invoice,
+            sales_amount, currency, customer_dim_key, TRIM(invoice_no) AS invoice_no,
+            TRIM(wesnet_order_no) AS wesnet_order_no, TRIM(order_number) AS order_number,
+            TRIM(order_integration_id) AS order_integration_id, accounting_include_flag,
+            sales_transfer_flag, kit_component_flag, TRIM(sim_description) AS sim_description,
+            TRIM(inventory_org_code) AS inventory_org_code, cost_amount, quantity, market_cost,
+            TRIM(transaction_type) AS transaction_type, invoice_line_no,
+            RANK() OVER (
+                PARTITION BY datasource_num_id, invoice_no, order_number, branch_id, 
+                COALESCE(CAST(invoice_line_no AS STRING), concat(CAST(sales_amount AS STRING), CAST(quantity AS STRING)))
+                ORDER BY updated_ts DESC, dl_load_date DESC
+            ) AS rnk
+        FROM brz_teradata.udm_sales_fact
+        WHERE datasource_num_id = 3000
+          AND to_date(date_invoice) BETWEEN '2025-05-01' AND '2025-05-31'
+    ) WHERE rnk = 1
+),
+uof_fixed AS (
+    SELECT 
+        TRIM(sales_order_no) AS sales_order_no, 
+        TRIM(branch_id) AS branch_id, 
+        datasource_num_id, 
+        TRIM(order_integration_id) AS order_integration_id, 
+        TRIM(flex_1) AS flex_1
+    FROM (
+        SELECT sales_order_no, branch_id, datasource_num_id, order_integration_id, flex_1,
+               ROW_NUMBER() OVER (
+                   PARTITION BY datasource_num_id, TRIM(sales_order_no), TRIM(branch_id), TRIM(order_integration_id)
+                   ORDER BY CASE WHEN TRIM(flex_1) IS NOT NULL AND TRIM(flex_1) <> '' THEN 0 ELSE 1 END,
+                            dl_load_date DESC, order_updated_ts DESC
+               ) AS rn
+        FROM brz_teradata.udm_order_fact
+        WHERE datasource_num_id = 3000
+    ) WHERE rn = 1
+)
 SELECT 
-    sbu,
-    ent_type,
-    rollup_category,
-    COUNT(*) AS row_cnt,
-    ROUND(SUM(sales_amount_USD), 2) AS total_usd
-FROM gld_eudm.digital_dashboard_control
-WHERE datasource_num_id = 3000
-  AND sbu = 'EES'
-  AND date_invoice BETWEEN '2025-05-01' AND '2025-05-31'
-GROUP BY sbu, ent_type, rollup_category
+    uof.flex_1 AS ent_type,
+    ROUND(SUM(CAST(sf.sales_amount AS DECIMAL(38,2)) * COALESCE(cr.conversion_rate, 1)), 2) AS total_usd
+FROM sf_may_2025 sf
+INNER JOIN (
+    SELECT branch_id, sbu FROM (
+        SELECT branch_id, sbu, ROW_NUMBER() OVER (PARTITION BY branch_id ORDER BY updated_ts DESC, dl_load_date DESC) AS rn
+        FROM brz_teradata.branch_dim
+    ) WHERE rn = 1 AND sbu = 'EES'
+) bd ON sf.branch_id = TRIM(bd.branch_id)
+LEFT JOIN uof_fixed uof ON (
+    uof.sales_order_no = sf.wesnet_order_no
+    AND uof.datasource_num_id = sf.datasource_num_id
+    AND uof.branch_id = sf.branch_id
+    AND uof.order_integration_id = sf.order_integration_id
+)
+LEFT JOIN (
+    SELECT customer_dim_key, TRIM(customer_no) AS customer_no, TRIM(customer_name) AS customer_name
+    FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY customer_dim_key ORDER BY updated_ts DESC, dl_load_date DESC) AS rn
+        FROM brz_teradata.udm_customer_dim
+    ) WHERE rn = 1
+) cus ON sf.customer_dim_key = cus.customer_dim_key
+LEFT JOIN brz_by_teradata.ora_conv_rates_mthly cr 
+    ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
+WHERE sf.accounting_include_flag = 'Y' 
+  AND COALESCE(sf.sales_transfer_flag, 'N') <> 'Y' 
+  AND COALESCE(sf.kit_component_flag, 'N') <> 'C' 
+  AND LEFT(cus.customer_no, 1) <> 'X' 
+  AND sf.sim_description <> 'Datacom Redaction' 
+  AND COALESCE(sf.inventory_org_code, '') <> 'SCS' 
+  AND (sf.sales_amount <> 0 OR sf.cost_amount <> 0 OR sf.quantity <> 0 OR sf.market_cost <> 0) 
+  AND sf.transaction_type <> 'X99'
+GROUP BY uof.flex_1
 ORDER BY total_usd DESC;
 
 
 
 
 
-%sql
+
+
+
 SELECT 
-    flex_1,
-    COUNT(*) AS raw_rows
-FROM brz_teradata.udm_order_fact
+    sbu,
+    rollup_category,
+    SUM(sales_amount_USD) AS total_usd
+FROM dss_marts.digital_dashboard_control
 WHERE datasource_num_id = 3000
-GROUP BY flex_1
-ORDER BY raw_rows DESC
-LIMIT 20;
-
-
-
-
+  AND date_invoice BETWEEN DATE '2025-05-01' AND DATE '2025-05-31'
+GROUP BY sbu, rollup_category
+ORDER BY sbu, rollup_category;
