@@ -1,4 +1,13 @@
-	src	rollup_category	total_usd
+-- 1. Check Frozen Teradata Control Table (Frozen on June 6, 2025)
+SELECT 'FROZEN_CONTROL' AS src, rollup_category, SUM(sales_amount_USD) AS total_usd
+FROM dss_marts.digital_dashboard_control
+WHERE datasource_num_id = 3000
+  AND sbu = 'EES'
+  AND date_invoice BETWEEN DATE '2025-05-01' AND DATE '2025-05-31'
+GROUP BY rollup_category;
+
+
+src	rollup_category	total_usd
 1	FROZEN_CONTROL	Integrations	19,267,821.003209353155
 2	FROZEN_CONTROL	Websites	13,054,814.384480351665
 3	FROZEN_CONTROL	Materials Management	5,137,214.024778018915
