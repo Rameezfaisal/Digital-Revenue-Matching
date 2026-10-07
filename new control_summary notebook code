@@ -1,0 +1,160 @@
+# Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
+# MAGIC %md
+# MAGIC Name        : gld_eudm.digital_dashboard_control_summary <br/>
+# MAGIC Catalog     : WESCO, EECOL <br/>
+# MAGIC Description : This notebook will be creating digital_dashboard_control_summary for vw_digital_revenue_dashboard <br/>
+# MAGIC Job ID: 2080, 2083 <br/>
+# MAGIC Operation ID:  2080262, 2083262 <br/>
+# MAGIC
+# MAGIC #### Change History - Must be updated for every change.<br/>
+# MAGIC |Version|Author|Date|Ticket|Short Description|
+# MAGIC |-------|------|----|------|-----------------|
+# MAGIC |1.0|Rameez|10-Sept-2026|DL-15445|created this notebook to fill digital_dashboard_control_summary table which is used  to replicate reconciliation framework based on the Teradata implementation that ensures the digital channel revenue is properly reflected in reporting.|
+
+# COMMAND ----------
+# MAGIC %run /Workspace/DE-Transformation/utilities/job_parameters_and_environment_configuration
+
+# COMMAND ----------
+from datetime import datetime
+
+# set min and max timestamp for incremental data
+min_cdc_value = cdc_value 
+max_cdc_value = datetime.now() 
+print(f"{min_cdc_value} | {max_cdc_value}")
+
+# COMMAND ----------
+# Truncation for full reload
+if reload == 'Y': 
+    print("Truncating data before load") 
+    spark.sql(f"""TRUNCATE TABLE gld_eudm.digital_dashboard_control_summary""") 
+    min_cdc_value = spark.sql(f"""select cast('1900-01-01T00:00:00.000+0000' as timestamp)""").collect()[0][0] 
+else: 
+    print("Incremental load")
+
+# COMMAND ----------
+# Run only on the 6th of the month (unless a manual full reload 'Y' is triggered)
+if datetime.now().day != 6 and reload != 'Y':
+    print(f"Today is {datetime.now().strftime('%Y-%m-%d')} (not the 6th). Skipping execution.")
+    
+    results = {
+        "Status": "Success",
+        "dq_summary": None,
+        "cdc_value": str(min_cdc_value)
+    }
+    
+    dbutils.notebook.exit(json.dumps(results))
+
+# COMMAND ----------
+# Replicate Teradata's max_date_loaded logic to only process newly added months
+spark.sql("""
+CREATE OR REPLACE TEMPORARY VIEW max_loaded_summary AS
+SELECT 
+    datasource_num_id, 
+    MAX(month_of_year) AS max_month_loaded
+FROM gld_eudm.digital_dashboard_control_summary
+GROUP BY datasource_num_id
+""")
+
+# COMMAND ----------
+# DBTITLE 1,with decimal precision
+main_df = spark.sql(f""" 
+WITH new_data AS (
+    SELECT 
+        d.datasource_num_id, 
+        d.rollup_category, 
+        date_format(d.date_invoice, 'yyyy-MM') AS month_of_year, 
+        d.total_no_of_sales, 
+        d.sales_amount, 
+        d.sales_amount_usd 
+    FROM gld_eudm.digital_dashboard_control d
+    LEFT JOIN max_loaded_summary m ON d.datasource_num_id = m.datasource_num_id
+    WHERE d.datasource_num_id IN (3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12001, 12002, 12003, 12004, 12005, 13000, 14000) 
+      AND date_format(d.date_invoice, 'yyyy-MM') > COALESCE(m.max_month_loaded, '1900-01')
+)
+SELECT 
+    datasource_num_id, 
+    rollup_category, 
+    month_of_year, 
+    CAST(SUM(total_no_of_sales) AS BIGINT) AS total_no_of_sales, 
+    CAST(SUM(sales_amount) AS DECIMAL(38,2)) AS sales_amount, 
+    CAST(SUM(sales_amount_usd) AS DECIMAL(38,12)) AS sales_amount_usd, 
+    current_date() AS create_date 
+FROM new_data 
+GROUP BY datasource_num_id, rollup_category, month_of_year 
+""")
+
+# COMMAND ----------
+# DBTITLE 1,Dq_Checks
+if Data_quality == 'Y': 
+    dq = create_dq_framework(spark) 
+    checks = [ 
+        # Removed rollup_category from null_check since it legitimately evaluates to NULL for offline sales
+        dq.null_check(df = main_df, columns = ["datasource_num_id", "month_of_year"]), 
+        dq.duplicate_check(df = main_df, columns = ["datasource_num_id", "rollup_category", "month_of_year"]) 
+    ] 
+    clean_df, dq_results = dq.execute_checks(
+        df = main_df, 
+        checks = checks, 
+        table_name = "gld_eudm.digital_dashboard_control_summary", 
+        catalog_name = catalog_name, 
+        fail_on_error = eval(fail_on_error)
+    )
+
+    if use_clean_data == 'Y':
+        clean_df.createOrReplaceTempView("final_df")
+        print("Processing cleansed dataframe")
+    else:
+        main_df.createOrReplaceTempView("final_df")
+        print("Processing main dataframe")
+
+else: 
+    print("Processing main dataframe") 
+    main_df.createOrReplaceTempView("final_df") 
+    dq_results = None
+
+# COMMAND ----------
+# DBTITLE 1,Insert (Append Only)
+try: 
+    spark.sql(f""" 
+        INSERT INTO gld_eudm.digital_dashboard_control_summary (
+            datasource_num_id,
+            rollup_category,
+            month_of_year,
+            total_no_of_sales,
+            sales_amount,
+            sales_amount_usd,
+            create_date,
+            dl_load_ts,
+            dl_updated_ts
+        )
+        SELECT 
+            datasource_num_id,
+            rollup_category,
+            month_of_year,
+            total_no_of_sales,
+            sales_amount,
+            sales_amount_usd,
+            create_date,
+            '{max_cdc_value}',
+            '{max_cdc_value}'
+        FROM final_df
+    """)
+
+    results = {
+        "Status": "Success",
+        "cdc_value": str(max_cdc_value)
+    }
+
+    dbutils.notebook.exit(json.dumps(results))
+
+except Exception as e: 
+    results = { 
+        "Status": "Failed", 
+        "error_message": str(e), 
+        "cdc_value": str(min_cdc_value) 
+    }
+    raise Exception(json.dumps(results))
