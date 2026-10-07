@@ -1,10 +1,7 @@
--- 1. Check Frozen Teradata Control Table (Frozen on June 6, 2025)
-SELECT 'FROZEN_CONTROL' AS src, rollup_category, SUM(sales_amount_USD) AS total_usd
-FROM dss_marts.digital_dashboard_control
-WHERE datasource_num_id = 3000
-  AND sbu = 'EES'
-  AND date_invoice BETWEEN DATE '2025-05-01' AND DATE '2025-05-31'
-GROUP BY rollup_category;
-
-
-
+Executing 2 data quality checks for gld_eudm.digital_dashboard_control on 21864942 records...
+Running: null_check_datasource_num_id-date_invoice-currency
+PASSED: null_check_datasource_num_id-date_invoice-currency
+Running: duplicate_check_datasource_num_id-sbu-cust_name-invoice_no-order_number-date_invoice-ent_type-rollup_category-currency
+WARNING (THRESHOLD EXCEEDED): duplicate_check_datasource_num_id-sbu-cust_name-invoice_no-order_number-date_invoice-ent_type-rollup_category-currency - 1202294 records (5.5%) > 0.0% threshold
+ERROR executing check duplicate_check_datasource_num_id-sbu-cust_name-invoice_no-order_number-date_invoice-ent_type-rollup_category-currency: Data quality check failed due to threshold breach: duplicate_check_datasource_num_id-sbu-cust_name-invoice_no-order_number-date_invoice-ent_type-rollup_category-currency - 5.5% > 0.0% threshold
+Warning: Could not store error records: (com.databricks.sql.managedcatalog.acl.UnauthorizedAccessException) PERMISSION_DENIED: User does not have MODIFY on Table 'uat_engineering.data_quality.quarantined_data'.
