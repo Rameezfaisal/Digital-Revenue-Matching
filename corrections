@@ -1,4 +1,9 @@
-i will paste below the query and the output and also should i do full reload every 6th of the month for both the control and control_summary table or not required to tackle full backup issue in bronze.
+i will paste below the query and the output and also should i do full reload every 6th of the month for both the control and control_summary table or not 
+i asked the reason of this architecture in teradata in first place so they answer like:
+from time to time , they do reload of data and in past we had issues with data missing when this happens . Due to which Dashboard totals change and our team will not be able to know what it looked before , so couple of years back our team came up with this Dashboard control process , to save the history in case of changes to data.
+we have this process in Teradata running every day and when there is a mismatch we get an email with differences. Trying to implement same in databricks
+
+so what is the best approach 
 
 %sql
 SELECT 
@@ -51,38 +56,6 @@ changed wesnet code with this uof corrected code:
     GROUP BY sf.datasource_num_id, uof.flex_1, bd.sbu, doc.rollup_category, sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.wesnet_order_no, dt.datasource_description, cr.conversion_rate
     HAVING SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) <> 0
 
-    UNION ALL
-
-    -- 2. LIBERTY (5000)
-    SELECT sf.datasource_num_id, bd.sbu, uof.ent_type, doc.rollup_category, sf.date_invoice,
-    count(distinct sf.order_number) as total_no_of_sales, SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) as sales_amount, sf.currency, dt.datasource_description as data_source_name, concat(cus.customer_no, '_', cus.customer_name) as cust_name, sf.invoice_no, sf.order_number,
-    CAST(coalesce(cr.conversion_rate, 1) AS DECIMAL(18,6)) as currency_conversion, 
-    CAST(SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) * coalesce(cr.conversion_rate, 1) AS DECIMAL(38,2)) as sales_amount_USD, 
-    current_date() as CREATE_DATE
-    FROM base_incremental_sales sf
-    LEFT JOIN (
-        SELECT 
-        TRIM(ent_type) AS ent_type, 
-        TRIM(sales_order_no) AS sales_order_no, 
-        TRIM(branch_id) as branch_id 
-        FROM (
-            SELECT ent_type, sales_order_no, branch_id,
-                   ROW_NUMBER() OVER (PARTITION BY datasource_num_id, sales_order_no, branch_id ORDER BY order_updated_ts DESC, dl_load_date DESC) AS rn
-            FROM brz_teradata.udm_order_fact
-            WHERE datasource_num_id = 5000
-        ) WHERE rn = 1
-    ) uof ON (
-        TRIM(CAST(uof.sales_order_no AS STRING)) = TRIM(CAST(sf.order_number AS STRING)) 
-        AND TRIM(CAST(sf.branch_id AS STRING)) = TRIM(CAST(uof.branch_id AS STRING))
-    )
-    LEFT JOIN dim_branch bd ON sf.branch_id = bd.branch_id 
-    LEFT JOIN dim_digital_channel doc ON (doc.ent_type = uof.ent_type AND doc.datasource_num_id = sf.datasource_num_id)
-    LEFT JOIN ref_datasource dt ON dt.datasource_num_id = sf.datasource_num_id 
-    LEFT JOIN dim_customer cus ON sf.customer_dim_key = cus.customer_dim_key 
-    LEFT JOIN ref_conversion_rates cr ON (cr.from_currency = sf.currency AND cr.to_currency = 'USD' AND year(sf.date_invoice) = cr.cnv_year AND month(sf.date_invoice) = cr.cnv_month)
-    WHERE sf.datasource_num_id = 5000
-    GROUP BY sf.datasource_num_id, uof.ent_type, bd.sbu, doc.rollup_category, sf.date_invoice, sf.currency, cus.customer_name, cus.customer_no, sf.invoice_no, sf.order_number, dt.datasource_description, cr.conversion_rate
-    HAVING SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) <> 0
 
 
 the output is:
