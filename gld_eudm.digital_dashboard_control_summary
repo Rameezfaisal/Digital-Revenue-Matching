@@ -13,7 +13,7 @@
 # MAGIC #### Change History - Must be updated for every change.<br/>
 # MAGIC |Version|Author|Date|Ticket|Short Description|
 # MAGIC |-------|------|----|------|-----------------|
-# MAGIC |1.0|Rameez|11-August-2026|DL-15445|created this notebook to fill digital_dashboard_control_summary table which is used  to replicate reconciliation framework based on the Teradata implementation that ensures the digital channel revenue is properly reflected in reporting.|
+# MAGIC |1.0|Rameez|10-Sept-2026|DL-15445|created this notebook to fill digital_dashboard_control_summary table which is used  to replicate reconciliation framework based on the Teradata implementation that ensures the digital channel revenue is properly reflected in reporting.|
 
 # COMMAND ----------
 
