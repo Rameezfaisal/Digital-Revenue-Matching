@@ -1,46 +1,30 @@
+%sql
 SELECT 
-    datasource_num_id,
-    invoice_no, 
-    order_number, 
-    date_invoice, 
-    dl_load_date, 
-    sales_amount
-FROM brz_teradata.udm_sales_fact
-WHERE date_invoice < '2024-05-01'  -- An invoice from months ago
-  AND dl_load_date > '2024-08-01'  -- That was updated/loaded much later
-  AND datasource_num_id = 3000     -- Using WESNET as an example
-LIMIT 1;
-
-
-
-
-SELECT 
-    invoice_no, 
-    order_number, 
-    date_invoice, 
-    sales_amount, 
-    CREATE_DATE
-FROM dss_marts.digital_dashboard_control
-WHERE invoice_no = '<your_invoice_no>' 
-  AND order_number = '<your_order_number>';
-
-
-
-
-
-SELECT 
-    invoice_no, 
-    order_number, 
-    date_invoice, 
-    sales_amount, 
-    dl_load_ts,
-    dl_updated_ts
+    sbu,
+    ent_type,
+    rollup_category,
+    COUNT(*) AS row_cnt,
+    ROUND(SUM(sales_amount_USD), 2) AS total_usd
 FROM gld_eudm.digital_dashboard_control
-WHERE invoice_no = '<your_invoice_no>' 
-  AND order_number = '<your_order_number>'
-ORDER BY dl_updated_ts DESC;
+WHERE datasource_num_id = 3000
+  AND sbu = 'EES'
+  AND date_invoice BETWEEN '2025-05-01' AND '2025-05-31'
+GROUP BY sbu, ent_type, rollup_category
+ORDER BY total_usd DESC;
 
 
+
+
+
+%sql
+SELECT 
+    flex_1,
+    COUNT(*) AS raw_rows
+FROM brz_teradata.udm_order_fact
+WHERE datasource_num_id = 3000
+GROUP BY flex_1
+ORDER BY raw_rows DESC
+LIMIT 20;
 
 
 
