@@ -21,30 +21,35 @@
 
 # COMMAND ----------
 
-import smtplib
+import smtplib, ssl, ast, io
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
-import os
+from datetime import date
 from pyspark.sql.functions import current_timestamp
 
-# Configuration Settings
-SMTP_SERVER = dbutils.widgets.get("smtp_server")
-SMTP_PORT = 25  # Standard internal SMTP port
-SENDER_EMAIL = "noreply-databricks@wescodist.com"
-RECIPIENTS = [
-    "rameez.ansari@wescodist.com"
-    # "BI_Wesco_Integration_Support_L2@wescodist.com",
-    # "srichard@wescodist.com",
-    # "vgolla@wescodist.com",
-    # "srilatha.mahankali@wescodist.com"
-]
-SUBJECT = "Digital Dashboard and Source records comparision Daily"
-LOCAL_CSV_PATH = "/tmp/Digital_dashboard_records_mismatch.csv"
+# --- Configuration Settings 
+SMTP_HOST = "smtp.office365.com"
+SMTP_PORT = 587
 
-def send_smtp_email(subject, body, recipients, attachment_path=None):
-    """Utility function to send emails with optional attachments via SMTP."""
+# Fetch credentials securely using the scope
+SMTP_USER = dbutils.secrets.get("ddpscopekeyvault001", "kvSvcDDPDatabricksNPUserName")
+SMTP_PASS = dbutils.secrets.get("ddpscopekeyvault001", "kvSvcDDPDatabricksnp")
+
+# Important: The sender email usually needs to match the authenticated user 
+# or an allowed alias when using Office365 SMTP.
+SENDER_EMAIL = SMTP_USER 
+
+# recipient list
+params = ast.literal_eval(dbutils.widgets.get("parameter_dictionary"))
+RECIPIENTS = params.get("email_recipients", [])
+
+
+SUBJECT = "Digital Dashboard and Source records comparision Daily"
+
+def send_smtp_email(subject, body, recipients, csv_content=None, csv_filename="mismatch_records.csv"):
+    """Utility function to send emails securely via Office365 SMTP with optional CSV attachment."""
     msg = MIMEMultipart()
     msg['From'] = SENDER_EMAIL
     msg['To'] = ", ".join(recipients)
@@ -52,22 +57,24 @@ def send_smtp_email(subject, body, recipients, attachment_path=None):
 
     msg.attach(MIMEText(body, 'plain'))
 
-    if attachment_path and os.path.exists(attachment_path):
-        filename = os.path.basename(attachment_path)
-        with open(attachment_path, "rb") as attachment:
-            part = MIMEBase("application", "octet-stream")
-            part.set_payload(attachment.read())
+    # Attach CSV if provided
+    if csv_content is not None:
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(csv_content.encode('utf-8'))
         encoders.encode_base64(part)
-        part.add_header(
-            "Content-Disposition",
-            f"attachment; filename= {filename}",
-        )
+        part.add_header('Content-Disposition', f'attachment; filename="{csv_filename}"')
         msg.attach(part)
 
     try:
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.sendmail(SENDER_EMAIL, recipients, msg.as_string())
-        server.quit()
+        # Create a secure SSL context and authenticate 
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as s:
+            s.ehlo()
+            s.starttls(context=ctx)
+            s.ehlo()
+            s.login(SMTP_USER, SMTP_PASS)
+            s.sendmail(SENDER_EMAIL, recipients, msg.as_string())
+            
         print(f"Email sent successfully to {', '.join(recipients)}")
     except Exception as e:
         print(f"Failed to send email via SMTP: {str(e)}")
@@ -78,7 +85,7 @@ def send_smtp_email(subject, body, recipients, attachment_path=None):
 # DBTITLE 1,View
 # MAGIC  %sql
 # MAGIC  -- Create the view by aggregating the deduplicated silver/gold table. 
-# MAGIC  -- The current month is excluded to match the legacy Teradata script's logic.
+# MAGIC  -- The current month is excluded to match the Teradata script's logic.
 # MAGIC
 # MAGIC  CREATE OR REPLACE VIEW gld_eudm.vw_digital_revenue_dashboard AS
 # MAGIC  WITH latest_dashboard_control AS (
@@ -131,39 +138,39 @@ mismatch_df = spark.sql("""
 
 """)
 
-mismatch_df.createOrReplaceTempView("mismatch")
+mismatch_count = mismatch_df.count()
 
 # COMMAND ----------
 
-mismatch_count = mismatch_df.count()
+
+current_date = date.today().strftime("%Y%m%d")
 
 if mismatch_count > 0:
     print(f"Data validation failed: Found {mismatch_count} mismatched records.")
     
-    # 1. Add audit timestamp and write to the Delta audit table
-    audit_df = mismatch_df.withColumn("audit_timestamp", current_timestamp())
-    audit_df.write \
-        .format("delta") \
-        .mode("append") \
-        .saveAsTable("gld_eudm.digital_dashboard_records_mismatch")
+    # 1. Convert mismatch records to CSV string
+    mismatch_pdf = mismatch_df.toPandas()
+    csv_buffer = io.StringIO()
+    mismatch_pdf.to_csv(csv_buffer, index=False)
+    csv_content = csv_buffer.getvalue()
     
-    # 2. Export mismatch records to a local CSV file for email attachment
-    mismatch_df.toPandas().to_csv(LOCAL_CSV_PATH, index=False)
+    # 2. Send mismatch email with CSV attachment
+    email_body = (
+        f"Hi Team,\n\n"
+        f"Data validation failed: Found {mismatch_count} mismatched records between the digital dashboard and source summary in {catalog_name}.\n\n"
+        f"Please find the mismatched records in the attached CSV file for investigation.\n\n"
+        f"Thank you,\nDatalake Transformation Team"
+    )
     
-    # 3. Send mismatch email with CSV attachment
-    email_body = "Please find attached the records summary having difference in source and digital dashboard control summary table."
-    send_smtp_email(SUBJECT, email_body, RECIPIENTS, attachment_path=LOCAL_CSV_PATH)
-    
-    # Clean up local temporary CSV file
-    if os.path.exists(LOCAL_CSV_PATH):
-        os.remove(LOCAL_CSV_PATH)
-        
-    # 4. Fail the notebook job run to alert pipeline orchestrator
-    raise Exception(f"Digital Dashboard Mismatch Audit Failed! {mismatch_count} rows differ. Please query gld_eudm.digital_dashboard_records_mismatch for details.")
+    csv_filename = f"digital_dashboard_mismatch_{current_date}.csv"
+    send_smtp_email(SUBJECT, email_body, RECIPIENTS, csv_content=csv_content, csv_filename=csv_filename)
+
+    print(f"Digital Dashboard Mismatch Audit Failed! {mismatch_count} rows differ. CSV sent to recipients.")
 
 else:
     print("Data validation passed: No mismatches found between the view and summary table.")
     
-    # Send success email matching Teradata script behavior
-    email_body = "There is no mismatch between Digital Dashboard and Source Record"
+    # Send success email
+    email_body = (f"There is no mismatch between Digital Dashboard and Source Record in {catalog_name}.\n\n"
+                    "Thank you,\nDatalake Transformation Team")
     send_smtp_email(SUBJECT, email_body, RECIPIENTS)
