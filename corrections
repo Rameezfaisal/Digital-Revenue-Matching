@@ -9,8 +9,8 @@ SELECT
     ROUND(SUM(CASE WHEN rollup_category = 'Websites' THEN sales_amount_USD ELSE 0 END), 2) AS websites_rev
 FROM gld_eudm.digital_dashboard_control
 WHERE datasource_num_id = 3000
-  AND date_invoice >= '2026-01-01' 
-  AND date_invoice <= '2026-01-31'
+  AND date_invoice >= '2025-05-01' 
+  AND date_invoice <= '2025-05-31'
 GROUP BY GROUPING SETS ((sbu), ())
 ORDER BY sbu;
 
@@ -18,11 +18,11 @@ ORDER BY sbu;
 this is the output:
 
 sbu	materials_management_rev	total_digital_revenue	integrations_rev	websites_rev
-CORP	0.00	1429857.21	0.00	0.00
-CSS	0.00	45297090.80	44227690.51	24700.45
-EES	4731121.72	300522563.82	17467331.10	10173940.96
-TOTAL	23756489.38	510937593.61	90026698.21	44974901.22
-UBS	19025367.66	163688081.78	28331676.60	34776259.81
+CORP	0.00	383949.57	0.00	0.00
+CSS	0.00	19844522.54	18051147.69	3514.20
+EES	5133018.72	352987566.96	19255362.32	13052874.75
+TOTAL	23500317.82	543110980.72	73234957.13	55102009.68
+UBS	18367299.10	169894941.65	35928447.12	42045620.73
 
 
 the ran this
