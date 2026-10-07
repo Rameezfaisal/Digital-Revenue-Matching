@@ -104,3 +104,19 @@ SELECT
 FROM gld_eudm.digital_dashboard_control
 WHERE datasource_num_id = 3000
   AND date_invoice BETWEEN '2025-05-01' AND '2025-05-31';
+
+
+
+
+
+WITH changed_invoices AS (
+    SELECT DISTINCT datasource_num_id, TRIM(invoice_no) AS invoice_no
+    FROM brz_teradata.udm_sales_fact
+    WHERE dl_load_date > '{min_cdc_value}'
+      AND datasource_num_id IN (3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12001, 12002, 12003, 12004, 12005, 13000, 14000)
+)
+SELECT ...
+FROM brz_teradata.udm_sales_fact sf
+INNER JOIN changed_invoices ci
+  ON sf.datasource_num_id = ci.datasource_num_id
+ AND TRIM(sf.invoice_no) = ci.invoice_no
