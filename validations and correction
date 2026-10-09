@@ -1,7 +1,1 @@
-Executing 2 data quality checks for gld_eudm.digital_dashboard_control on 21864942 records...
-Running: null_check_datasource_num_id-date_invoice-currency
-PASSED: null_check_datasource_num_id-date_invoice-currency
-Running: duplicate_check_datasource_num_id-sbu-cust_name-invoice_no-order_number-date_invoice-ent_type-rollup_category-currency
-WARNING (THRESHOLD EXCEEDED): duplicate_check_datasource_num_id-sbu-cust_name-invoice_no-order_number-date_invoice-ent_type-rollup_category-currency - 1202294 records (5.5%) > 0.0% threshold
-ERROR executing check duplicate_check_datasource_num_id-sbu-cust_name-invoice_no-order_number-date_invoice-ent_type-rollup_category-currency: Data quality check failed due to threshold breach: duplicate_check_datasource_num_id-sbu-cust_name-invoice_no-order_number-date_invoice-ent_type-rollup_category-currency - 5.5% > 0.0% threshold
-Warning: Could not store error records: (com.databricks.sql.managedcatalog.acl.UnauthorizedAccessException) PERMISSION_DENIED: User does not have MODIFY on Table 'uat_engineering.data_quality.quarantined_data'.
+​"I am updating the dashboard control process to strictly freeze our historical monthly baselines, ensuring that any future full reloads of the Teradata source tables will not overwrite past data or impact our previously reported dashboard totals."
