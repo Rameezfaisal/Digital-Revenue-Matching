@@ -1,1 +1,7 @@
-​"I am updating the dashboard control process to strictly freeze our historical monthly baselines, ensuring that any future full reloads of the Teradata source tables will not overwrite past data or impact our previously reported dashboard totals."
+should i update sf_sales_fact view with this where clause
+WHERE dl_load_date > '{min_cdc_value}' so it will process less data 
+and even we got a reload all these filters will work
+where dl_load_date > '{min_cdc_value}' 
+and AND to_date(sf.date_invoice) >= DATE '2024-01-01'
+      AND to_date(sf.date_invoice) > COALESCE(ml.max_date_loaded, DATE '2023-12-31')
+      AND to_date(sf.date_invoice) < trunc(current_date(), 'MM')
