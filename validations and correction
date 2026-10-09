@@ -1,7 +1,24 @@
-should i update sf_sales_fact view with this where clause
-WHERE dl_load_date > '{min_cdc_value}' so it will process less data 
-and even we got a reload all these filters will work
-where dl_load_date > '{min_cdc_value}' 
-and AND to_date(sf.date_invoice) >= DATE '2024-01-01'
-      AND to_date(sf.date_invoice) > COALESCE(ml.max_date_loaded, DATE '2023-12-31')
-      AND to_date(sf.date_invoice) < trunc(current_date(), 'MM')
+After updating this line in all 12 blocks for sales_amount_usd code with this
+CAST(SUM(CAST(sf.sales_amount AS DECIMAL(38,2))) * coalesce(cr.conversion_rate, 1) AS DECIMAL(38,12)) as sales_amount_USD
+
+i ran this query:
+
+%sql
+SELECT DISTINCT 
+    sales_amount_USD
+FROM final_df
+WHERE 
+    sales_amount_USD IS NOT NULL 
+    AND sales_amount_USD != 0
+    -- Length of '0.' is 2. If it has > 4 digits after decimal, total length > 6
+    AND LENGTH(REGEXP_REPLACE(CAST(sales_amount AS STRING), '0+$', '')) > 11;
+
+and the output is:
+sales_amount_USD
+-36427165.450000000000
+-11348280.160000000000
+-32860889.650000000000
+-12833212.990000000000
+
+
+so i dont think decimal precision is really useful here
