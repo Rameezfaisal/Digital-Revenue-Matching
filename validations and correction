@@ -1,48 +1,14 @@
-spark.sql("""
-CREATE OR REPLACE TEMPORARY VIEW sf_sales_fact AS
-SELECT * FROM (
-    SELECT 
-        sf.datasource_num_id,
-        TRIM(sf.branch_id) AS branch_id,
-        to_date(sf.date_invoice) AS date_invoice,
-        sf.sales_amount,
-        TRIM(sf.currency) AS currency,
-        sf.customer_dim_key,
-        TRIM(sf.invoice_no) AS invoice_no,
-        TRIM(sf.wesnet_order_no) AS wesnet_order_no,
-        TRIM(sf.order_number) AS order_number,
-        TRIM(sf.order_integration_id) AS order_integration_id,
-        TRIM(sf.accounting_include_flag) AS accounting_include_flag,
-        TRIM(sf.sales_transfer_flag) AS sales_transfer_flag,
-        TRIM(sf.kit_component_flag) AS kit_component_flag,
-        TRIM(sf.sim_description) AS sim_description,
-        TRIM(sf.inventory_org_code) AS inventory_org_code,
-        sf.cost_amount,
-        sf.quantity,
-        sf.market_cost,
-        TRIM(sf.transaction_type) AS transaction_type,
-        sf.invoice_line_no,
-        sf.conversion_rate,
-        sf.budget_conversion_rate,
-        TRIM(sf.flex_1) AS flex_1,
-        sf.dl_load_date,
-        sf.updated_ts,
-        RANK() OVER (
-            PARTITION BY 
-                sf.datasource_num_id, 
-                TRIM(sf.invoice_no), 
-                TRIM(sf.order_number), 
-                TRIM(sf.branch_id),
-                COALESCE(CAST(sf.invoice_line_no AS STRING), concat(CAST(sf.sales_amount AS STRING), CAST(sf.quantity AS STRING)))
-            ORDER BY sf.updated_ts DESC, sf.dl_load_date DESC
-        ) AS rnk
-    FROM brz_teradata.udm_sales_fact sf
-    LEFT JOIN max_loaded_per_ds ml 
-        ON sf.datasource_num_id = ml.datasource_num_id
-    WHERE sf.datasource_num_id IN (3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12001, 12002, 12003, 12004, 12005, 13000, 14000)
-      AND to_date(sf.date_invoice) >= DATE '2024-01-01'
-      AND to_date(sf.date_invoice) > COALESCE(ml.max_date_loaded, DATE '2023-12-31')
-      AND to_date(sf.date_invoice) < trunc(current_date(), 'MM')
-)
-WHERE rnk = 1
-""")
+CASE WHEN TRIM(flex_1) IS NOT NULL AND TRIM(flex_1) <> '' THEN 0 ELSE 1 END,
+
+
+
+CASE WHEN TRIM(ent_type) IS NOT NULL AND TRIM(ent_type) <> '' THEN 0 ELSE 1 END,
+
+
+
+
+ROW_NUMBER() OVER (PARTITION BY datasource_num_id,trim(sales_order_no), trim(branch_id), order_integration_id ORDER BY order_updated_ts DESC, dl_load_date DESC) AS rn
+
+
+
+ROW_NUMBER() OVER (PARTITION BY datasource_num_id,trim(sales_order_no), trim(branch_id), order_integration_id ORDER BY CASE WHEN TRIM(flex_1) IS NOT NULL AND TRIM(flex_1) <> '' THEN 0 ELSE 1 END, order_updated_ts DESC, dl_load_date DESC) AS rn
