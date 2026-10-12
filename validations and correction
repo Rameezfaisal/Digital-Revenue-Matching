@@ -1,31 +1,27 @@
-i ran this query in databricks:
-SELECT 
-    COUNT(DISTINCT order_number) AS distinct_orders,
-    SUM(total_no_of_sales) AS total_sales_metric
-FROM gld_eudm.digital_dashboard_control
-WHERE datasource_num_id = 12004
-  AND date_invoice >= '2026-09-01' 
-  AND date_invoice <= '2026-09-30';
-
-output is:
-
-distinct_orders	total_sales_metric
-196782	294428
-
-when i run this in teradata:
-
-SELECT 
-    COUNT(DISTINCT order_number) AS distinct_orders,
-    SUM(total_no_of_sales) AS total_sales_metric
-FROM dss_marts.digital_dashboard_control
-WHERE datasource_num_id = 12004
-  AND date_invoice >= '2026-09-01' 
-  AND date_invoice <= '2026-09-30';
-
-output is:
-
-	distinct_orders	total_sales_metric
-1	196,768	259,042
+SELECT datasource_num_id, TRIM(invoice_no), TRIM(order_number), TRIM(branch_id), 
+       COALESCE(CAST(invoice_line_no AS STRING), concat(CAST(sales_amount AS STRING), CAST(quantity AS STRING))), 
+       updated_ts, dl_load_date, COUNT(*) as duplicate_count
+FROM brz_teradata.udm_sales_fact
+WHERE datasource_num_id = 12004 
+  AND date_invoice >= '2026-09-01' AND date_invoice <= '2026-09-30'
+GROUP BY 1, 2, 3, 4, 5, 6, 7
+HAVING COUNT(*) > 1;
 
 
-why is the difference what needs to be corrected if you want me to run any queries to find the rootcause you can share me here i will run and paste the outputs
+
+
+SELECT FROM_CURR_C, rate_type, FISCAL_YY_D, FISCAL_MM_D, COUNT(*) as duplicate_count
+FROM anixter_conv_rates 
+WHERE rate_type = 'MTEND' AND FISCAL_YY_D = 2026 AND FISCAL_MM_D = 9
+GROUP BY FROM_CURR_C, rate_type, FISCAL_YY_D, FISCAL_MM_D
+HAVING COUNT(*) > 1;
+
+
+
+
+
+
+SELECT branch_id, COUNT(*) as duplicate_count
+FROM dim_branch
+GROUP BY branch_id
+HAVING COUNT(*) > 1;
